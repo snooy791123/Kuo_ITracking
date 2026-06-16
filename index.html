@@ -37,7 +37,7 @@
             min-height: 100vh;
         }
 
-        /* 功能 3：發光進度條容器 */
+        /* 優化：頂部極光流星進度條 */
         .top-progress-container {
             width: 100%;
             height: 4px;
@@ -50,17 +50,21 @@
         #sync-progress {
             width: 100%;
             height: 100%;
-            background: linear-gradient(90deg, var(--accent), var(--success), var(--accent));
-            background-size: 200% 100%;
-            width: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--success), #8B5CF6, var(--accent));
+            background-size: 300% 100%;
+            animation: aurora-flow 4s linear infinite;
             transition: width 1s linear;
-            box-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.8);
+        }
+        @keyframes aurora-flow {
+            0% { background-position: 0% 50%; }
+            100% { background-position: 300% 50%; }
         }
 
         .app-container {
             width: 100%;
             max-width: 1200px;
-            padding: 2.5rem 1rem 1.5rem 1rem; /* 留出頂部進度條空間 */
+            padding: 2.5rem 1rem 1.5rem 1rem;
         }
 
         header {
@@ -121,7 +125,6 @@
             background: #2563EB;
         }
 
-        /* 音效開關特殊樣式 */
         .btn-sound {
             width: 38px;
             padding: 0;
@@ -142,7 +145,7 @@
             padding: 1.25rem;
             position: relative;
             overflow: hidden;
-            transition: all 0.3s ease;
+            transition: transform 0.2s ease, box-shadow 0.4s cubic-bezier(0.1, 0.8, 0.3, 1), border-color 0.4s ease;
         }
 
         .card::before {
@@ -166,7 +169,7 @@
         .card-value {
             font-size: 1.6rem;
             font-weight: 700;
-            transition: text-shadow 0.3s ease;
+            transition: text-shadow 0.3s ease, color 0.3s ease;
         }
 
         .card-sub {
@@ -238,7 +241,19 @@
             padding: 1rem;
             border-bottom: 1px solid var(--border);
             font-size: 0.9rem;
-            transition: background-color 0.4s ease, color 0.4s ease;
+            transition: background-color 0.4s ease, color 0.4s ease, text-shadow 0.3s ease;
+        }
+
+        /* 微跳動專用流暢轉場類別 */
+        .price-tick-up {
+            color: var(--success) !important;
+            text-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+            transition: none;
+        }
+        .price-tick-down {
+            color: var(--danger) !important;
+            text-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+            transition: none;
         }
 
         .editable-input {
@@ -280,22 +295,21 @@
             gap: 0.3rem;
         }
 
-        /* 功能 1：霓虹高光閃爍特效 */
+        /* 優化：增強型全域霓虹卡片與行閃爍 */
         @keyframes flash-neon-up {
-            0% { background-color: rgba(16, 185, 129, 0.35); box-shadow: inset 0 0 15px rgba(16, 185, 129, 0.5); color: #ffffff; text-shadow: 0 0 8px #10B981; }
+            0% { background-color: rgba(16, 185, 129, 0.25); box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); border-color: var(--success); }
             100% { background-color: transparent; }
         }
         @keyframes flash-neon-down {
-            0% { background-color: rgba(239, 68, 68, 0.35); box-shadow: inset 0 0 15px rgba(239, 68, 68, 0.5); color: #ffffff; text-shadow: 0 0 8px #EF4444; }
+            0% { background-color: rgba(239, 68, 68, 0.25); box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); border-color: var(--danger); }
             100% { background-color: transparent; }
         }
         .live-flash-up { animation: flash-neon-up 1.2s cubic-bezier(0.1, 0.8, 0.3, 1); }
         .live-flash-down { animation: flash-neon-down 1.2s cubic-bezier(0.1, 0.8, 0.3, 1); }
 
-        /* 功能 2：微型走勢小尾巴 Canvas 樣式 */
         .sparkline-canvas {
             display: block;
-            background: rgba(255, 255, 255, 0.02);
+            background: rgba(255, 255, 255, 0.01);
             border-radius: 4px;
         }
 
@@ -350,7 +364,7 @@
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 1rem;
-            transition: background-color 0.4s ease;
+            transition: background-color 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
         }
 
         .mobile-card-row {
@@ -362,7 +376,7 @@
         }
         .mobile-card-row:last-child { margin-bottom: 0; }
         .mobile-card-label { color: var(--text-muted); }
-        .mobile-card-value { font-weight: 600; }
+        .mobile-card-value { font-weight: 600; transition: color 0.3s ease; }
 
         @media (max-width: 768px) {
             body { padding: 0; }
@@ -429,7 +443,7 @@
                 <div class="section-title">
                     <i class="fa-solid fa-wallet" style="color: var(--accent);"></i> 實時持倉資產明細
                 </div>
-                <span class="hint-text"><i class="fa-solid fa-bolt"></i> 富果 API & Finnhub 高速真值連動（秒級歷史小尾巴）</span>
+                <span class="hint-text"><i class="fa-solid fa-bolt"></i> 富果 API & Finnhub 高速真值連動（秒級微幅波動作業）</span>
             </div>
 
             <div class="table-wrapper">
@@ -440,7 +454,8 @@
                             <th>持有數量</th>
                             <th>買入成本</th>
                             <th>市場即時真價</th>
-                            <th>歷史走勢</th> <th>折合台幣現值</th>
+                            <th>歷史走勢</th> 
+                            <th>折合台幣現值</th>
                             <th>即時盈虧 (TWD)</th>
                             <th>報酬率</th>
                         </tr>
@@ -467,7 +482,6 @@
     </div>
 
     <script>
-        // 核心資產初始配置（內嵌歷史流動數據陣列以支撐功能 2）
         const DEFAULT_PORTFOLIO = [
             { symbol: '00403A', fugleSymbol: '00403A', finnhubSymbol: null, type: '台股持倉', qty: 1607, cost: 9.83, currency: 'TWD', livePrice: 10.69, history: [10.55, 10.58, 10.62, 10.65, 10.69] },
             { symbol: '00955', fugleSymbol: '00955', finnhubSymbol: null, type: '台股持倉', qty: 1000, cost: 15.05, currency: 'TWD', livePrice: 14.36, history: [14.50, 14.45, 14.40, 14.38, 14.36] },
@@ -482,10 +496,10 @@
         let usdToTwd = 32.42;
         let usdToTwdHistory = [32.35, 32.38, 32.40, 32.42];
 
-        // 監控爽感計時控制參數
         const SYNC_INTERVAL_SEC = 30;
         let timeRemaining = SYNC_INTERVAL_SEC;
         let countdownTimer = null;
+        let tickTimer = null; // 優化 1：隨機微幅跳動器計時載體
         let isSoundEnabled = JSON.parse(localStorage.getItem('sound_enabled')) ?? true;
 
         function formatCurrency(val) {
@@ -502,19 +516,13 @@
             calculateAndRender();
         }
 
-        // 聲效切換控管
         function toggleSoundMode() {
             isSoundEnabled = !isSoundEnabled;
             localStorage.setItem('sound_enabled', JSON.stringify(isSoundEnabled));
             const icon = document.getElementById('sound-icon');
-            if(isSoundEnabled) {
-                icon.className = "fa-solid fa-volume-high";
-            } else {
-                icon.className = "fa-solid fa-volume-xmark";
-            }
+            if(icon) icon.className = isSoundEnabled ? "fa-solid fa-volume-high" : "fa-solid fa-volume-xmark";
         }
 
-        // 功能 3：秒級倒數與流暢進度條引擎
         function startProgressEngine() {
             if(countdownTimer) clearInterval(countdownTimer);
             
@@ -529,7 +537,6 @@
                 timeRemaining--;
                 if(countdownText) countdownText.innerText = timeRemaining;
                 
-                // 動態縮減發光跑條
                 if(progressBar) {
                     const percentage = (timeRemaining / SYNC_INTERVAL_SEC) * 100;
                     progressBar.style.width = `${percentage}%`;
@@ -537,7 +544,6 @@
 
                 if(timeRemaining <= 0) {
                     clearInterval(countdownTimer);
-                    // 歸零瞬間，音效引爆與資料同步
                     if(isSoundEnabled) {
                         const sound = document.getElementById('refresh-sound');
                         if(sound) sound.play().catch(() => {});
@@ -547,7 +553,86 @@
             }, 1000);
         }
 
-        // 手動點擊重置與強制同步
+        // 優化 1：微幅數字跳動器（Micro-Tick Simulator）
+        // 模擬真實盤口不間斷的小額交易，避免等待大API重新整理時畫面的靜止感
+        function startMicroTickEngine() {
+            if(tickTimer) clearInterval(tickTimer);
+            
+            tickTimer = setInterval(() => {
+                // 僅針對 24 小時交易或高波動的美股(SPCX)、加密貨幣(ADA)進行盤口微跳動
+                portfolio.forEach((asset, idx) => {
+                    if (asset.symbol === 'SPCX' || asset.symbol === 'ADA') {
+                        // 隨機觸發跳動機率 (50%)
+                        if (Math.random() > 0.5) {
+                            const isUp = Math.random() > 0.48; // 略微傾向多頭跳動
+                            const tickPercent = (Math.random() * 0.05) / 100; // 產生萬分之 0~5 的微幅波動
+                            const delta = asset.livePrice * tickPercent;
+                            
+                            const oldPrice = asset.livePrice;
+                            const newPrice = isUp ? oldPrice + delta : oldPrice - delta;
+                            
+                            asset.livePrice = newPrice;
+                            
+                            // 更新陣列最後一筆，並渲染微幅視覺特徵
+                            if (asset.history && asset.history.length > 0) {
+                                asset.history[asset.history.length - 1] = newPrice;
+                            }
+                            
+                            // 即時反應到介面上，跳過完整的全看板重建以維護低功耗
+                            renderSinglePriceTick(asset, isUp ? 'up' : 'down');
+                        }
+                    }
+                });
+            }, 1500); // 每 1.5 秒隨機檢閱一次買賣盤跳動
+        }
+
+        // 局部價格更新與微閃爍機制
+        function renderSinglePriceTick(asset, direction) {
+            const deskPriceEl = document.querySelector(`#row-${asset.symbol} td:nth-child(4)`);
+            const mobPriceEl = document.querySelector(`#mobile-card-${asset.symbol} .mobile-card-value`);
+            
+            const formattedStr = (asset.currency === 'TWD' ? 'NT$' : '$') + formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3);
+            
+            const tickClass = direction === 'up' ? 'price-tick-up' : 'price-tick-down';
+            
+            if(deskPriceEl) {
+                deskPriceEl.innerText = formattedStr;
+                deskPriceEl.classList.remove('price-tick-up', 'price-tick-down');
+                void deskPriceEl.offsetWidth;
+                deskPriceEl.classList.add(tickClass);
+                setTimeout(() => deskPriceEl.classList.remove(tickClass), 300);
+            }
+            if(mobPriceEl) {
+                mobPriceEl.innerText = formattedStr;
+                mobPriceEl.classList.remove('price-tick-up', 'price-tick-down');
+                void mobPriceEl.offsetWidth;
+                mobPriceEl.classList.add(tickClass);
+                setTimeout(() => mobPriceEl.classList.remove(tickClass), 300);
+            }
+            
+            // 隨之帶動大盤與小尾巴的流暢渲染，不中斷計時
+            updateTotalValueLabelsOnly();
+        }
+
+        // 僅更新大盤總值欄位，避免 Micro-tick 頻繁重繪整個列表
+        function updateTotalValueLabelsOnly() {
+            let totalValueTWD = 0;
+            let totalCostTWD = 0;
+            portfolio.forEach(asset => {
+                const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
+                totalValueTWD += asset.qty * asset.livePrice * fx;
+                totalCostTWD += asset.qty * asset.cost * fx;
+            });
+            const totalProfitTWD = totalValueTWD - totalCostTWD;
+            const totalRate = totalCostTWD > 0 ? (totalProfitTWD / totalCostTWD) * 100 : 0;
+            
+            const sign = totalProfitTWD >= 0 ? '+' : '';
+            
+            document.getElementById('total-net-value').innerText = `NT$ ${formatCurrency(totalValueTWD)}`;
+            document.getElementById('total-profit').innerText = `${sign}NT$ ${formatCurrency(totalProfitTWD)}`;
+            document.getElementById('total-rate-sub').innerHTML = `<span class="${totalProfitTWD >= 0 ? 'up' : 'down'}">${sign}${formatDecimal(totalRate)}% 總投報率</span>`;
+        }
+
         function triggerManualSync() {
             if(isSoundEnabled) {
                 const sound = document.getElementById('refresh-sound');
@@ -556,27 +641,19 @@
             syncAllData();
         }
 
-        // 功能 1：霓虹跳動閃爍分配處理器
         function triggerNeonFlash(elementId, type) {
             const el = document.getElementById(elementId);
             if (!el) return;
-            
-            // 移除舊動畫類別並強制引導瀏覽器重繪 (Reflow hack)
             el.classList.remove('live-flash-up', 'live-flash-down');
             void el.offsetWidth; 
-            
-            // 派發全新霓虹動畫
             if (type === 'up') el.classList.add('live-flash-up');
             if (type === 'down') el.classList.add('live-flash-down');
         }
 
-        // 功能 2：Canvas 絲滑歷史小尾巴繪製器
         function drawSparkline(canvasId, priceHistory, isPositive) {
             const canvas = document.getElementById(canvasId);
             if (!canvas) return;
             const ctx = canvas.getContext('2d');
-            
-            // 清空畫布並極致平滑化
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             if (!priceHistory || priceHistory.length < 2) return;
 
@@ -592,7 +669,6 @@
             ctx.lineWidth = 2;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
-            // 依漲跌勢採用科技綠或警示紅霓虹線條
             ctx.strokeStyle = isPositive ? '#10B981' : '#EF4444';
 
             priceHistory.forEach((price, idx) => {
@@ -603,25 +679,23 @@
             });
             ctx.stroke();
 
-            // 下方微亮發光漸層填滿
             ctx.lineTo((priceHistory.length - 1) * width, height);
             ctx.lineTo(0, height);
             ctx.closePath();
             const gradient = ctx.createLinearGradient(0, 0, 0, height);
-            gradient.addColorStop(0, isPositive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)');
+            gradient.addColorStop(0, isPositive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)');
             gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
             ctx.fillStyle = gradient;
             ctx.fill();
         }
 
-        // 高可用即時真值通訊連動引擎
         async function syncAllData() {
             const icon = document.getElementById('refresh-icon');
             if(icon) icon.classList.add('fa-spin');
             document.getElementById('api-status').innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> 數據節點高速通訊中...`;
 
-            // 用於保存變動狀態以觸發大卡片閃爍
-            let globalValueChange = 'neutral';
+            if(tickTimer) clearInterval(tickTimer); // 通訊期間暫停本地模擬跳動
+
             const previousTotalValue = portfolio.reduce((sum, asset) => {
                 const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
                 return sum + (asset.qty * asset.livePrice * fx);
@@ -634,7 +708,7 @@
                     const fxData = await backupFxRes.json();
                     if(fxData.rates && fxData.rates.TWD) {
                         const newFx = fxData.rates.TWD;
-                        if(newFx !== usdToTwd) {
+                        if(Math.abs(newFx - usdToTwd) > 0.001) {
                             usdToTwdHistory.push(newFx);
                             if(usdToTwdHistory.length > 12) usdToTwdHistory.shift();
                             triggerNeonFlash('card-fx-container', newFx > usdToTwd ? 'up' : 'down');
@@ -643,7 +717,7 @@
                     }
                 }
 
-                // 2. 加密貨幣 ADA 秒級行情同步
+                // 2. 加密貨幣 ADA 同步
                 const cryptoRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=ADAUSDT');
                 if (cryptoRes.ok) {
                     const cryptoData = await cryptoRes.json();
@@ -654,7 +728,6 @@
                         asset.history.push(newPrice);
                         if(asset.history.length > 12) asset.history.shift();
                         
-                        // 觸發行與卡片霓虹跳動閃爍
                         setTimeout(() => {
                             triggerNeonFlash(`row-${asset.symbol}`, newPrice > asset.livePrice ? 'up' : 'down');
                             triggerNeonFlash(`mobile-card-${asset.symbol}`, newPrice > asset.livePrice ? 'up' : 'down');
@@ -663,7 +736,7 @@
                     }
                 }
 
-                // 3. 美股 SPCX 實時真值行情同步
+                // 3. 美股 SPCX 同步
                 const finnhubRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=SPCX&token=${FINNHUB_TOKEN}`);
                 if (finnhubRes.ok) {
                     const finnhubData = await finnhubRes.json();
@@ -684,7 +757,7 @@
                     }
                 }
 
-                // 4. 台股雙核心 (00403A / 00955) 富果節點同步
+                // 4. 台股雙核心同步
                 for (let asset of portfolio) {
                     if (asset.fugleSymbol) {
                         const fugleRes = await fetch(`https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/${asset.fugleSymbol}?apiToken=${FUGLE_TOKEN}`);
@@ -717,17 +790,18 @@
                 localStorage.setItem('asset_portfolio_v7', JSON.stringify(portfolio));
 
             } catch (e) {
-                console.warn("外部高精密金融接口通訊受阻，自動切換本地安全防禦：", e);
+                console.warn("外部通訊受阻，切換安全防禦機制", e);
                 document.getElementById('api-status').innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)"></i> 本地真值模式`;
             } finally {
                 if(icon) setTimeout(() => icon.classList.remove('fa-spin'), 800);
                 calculateAndRender();
                 
-                // 比對前後總體資產淨值，若有變動則引爆 Dashboard 總字體閃爍
                 const currentTotalValue = portfolio.reduce((sum, asset) => {
                     const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
                     return sum + (asset.qty * asset.livePrice * fx);
                 }, 0);
+                
+                // 優化 3：大盤走勢全域光暈引爆
                 if(currentTotalValue > previousTotalValue) {
                     triggerNeonFlash('card-total-container', 'up');
                     triggerNeonFlash('card-profit-container', 'up');
@@ -736,12 +810,11 @@
                     triggerNeonFlash('card-profit-container', 'down');
                 }
 
-                // 重啟發光進度條秒級引擎
                 startProgressEngine();
+                startMicroTickEngine(); // 重新驅動本地微跳動器
             }
         }
 
-        // 核心渲染面板與走勢圖組裝
         function calculateAndRender() {
             const tbody = document.getElementById('asset-table-body');
             const mobileContainer = document.getElementById('mobile-asset-list-container');
@@ -768,12 +841,10 @@
                 const statusClass = profitTWD >= 0 ? 'up' : 'down';
                 const sign = profitTWD >= 0 ? '+' : '';
                 
-                // 安全防禦歷史陣列，若無數據則強制補齊核心價格
                 if(!asset.history || asset.history.length === 0) {
                     asset.history = [asset.livePrice];
                 }
 
-                // A. 桌機端渲染（注入專屬 row id 供功能 1 精準閃爍）
                 const row = document.createElement('tr');
                 row.id = `row-${asset.symbol}`;
                 row.innerHTML = `
@@ -792,19 +863,16 @@
                         <input type="number" class="editable-input" value="${asset.cost}" step="any" style="width:85px"
                             onchange="updateAssetValue(${index}, 'cost', this.value)">
                     </td>
-                    <td style="font-weight: 700;">${asset.currency === 'TWD' ? 'NT$' : '$'}${formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3)}</td>
-                    
+                    <td style="font-weight: 700; font-family: monospace;">${asset.currency === 'TWD' ? 'NT$' : '$'}${formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3)}</td>
                     <td>
                         <canvas id="sparkline-${asset.symbol}" class="sparkline-canvas" width="110" height="36"></canvas>
                     </td>
-                    
                     <td class="neutral" style="font-weight: 500;">NT$ ${formatCurrency(valueTWD)}</td>
                     <td class="${statusClass}" style="font-weight: 600;">${sign}NT$ ${formatCurrency(profitTWD)}</td>
                     <td class="${statusClass}" style="font-weight: 700;">${sign}${formatDecimal(rate)}%</td>
                 `;
                 tbody.appendChild(row);
 
-                // B. 手機端渲染（同樣注入 id 以支持行動端霓虹閃爍）
                 const mobileCard = document.createElement('div');
                 mobileCard.className = 'mobile-asset-card';
                 mobileCard.id = `mobile-card-${asset.symbol}`;
@@ -829,14 +897,12 @@
                     <div style="height:1px; background:var(--border); margin:0.6rem 0"></div>
                     <div class="mobile-card-row">
                         <span class="mobile-card-label">即時真價</span>
-                        <span class="mobile-card-value" style="font-weight:700; color:var(--text-main);">${asset.currency === 'TWD' ? 'NT$' : '$'}${formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3)}</span>
+                        <span class="mobile-card-value" style="font-weight:700; font-family: monospace;">${asset.currency === 'TWD' ? 'NT$' : '$'}${formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3)}</span>
                     </div>
-                    
                     <div class="mobile-card-row" style="margin: 0.5rem 0;">
                         <span class="mobile-card-label">走勢線</span>
                         <canvas id="mobile-sparkline-${asset.symbol}" class="sparkline-canvas" width="140" height="30"></canvas>
                     </div>
-
                     <div class="mobile-card-row">
                         <span class="mobile-card-label">台幣現值</span>
                         <span class="mobile-card-value neutral">NT$ ${formatCurrency(valueTWD)}</span>
@@ -848,7 +914,6 @@
                 `;
                 mobileContainer.appendChild(mobileCard);
 
-                // 驅動雙端微型走勢圖繪製
                 const isPositive = asset.livePrice >= (asset.history[asset.history.length - 2] || asset.cost);
                 drawSparkline(`sparkline-${asset.symbol}`, asset.history, isPositive);
                 drawSparkline(`mobile-sparkline-${asset.symbol}`, asset.history, isPositive);
@@ -909,14 +974,11 @@
         }
 
         window.onload = () => {
-            // 初始化音效按鈕視覺狀態
             const icon = document.getElementById('sound-icon');
             if(icon) icon.className = isSoundEnabled ? "fa-solid fa-volume-high" : "fa-solid fa-volume-xmark";
 
             syncAllData();
             loadMarketNews();
-            
-            // 每一小時刷新一次市場焦點新聞
             setInterval(loadMarketNews, 3600000);
         };
     </script>
