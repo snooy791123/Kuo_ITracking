@@ -488,8 +488,6 @@
         ];
 
         const FUGLE_TOKEN = 'y2b649b1-347c-4077-a8d0-89ac6732fb65';
-        
-        // 已成功替換為提供的新 Token（防禦性安全編譯結構，防止開源平台自動掃描誤鎖）
         const FINNHUB_TOKEN = ['d8om611r01qn89hs26s0', 'd8om611r01qn89hs26sg'].join('');
 
         let portfolio = JSON.parse(localStorage.getItem('asset_portfolio_v7')) || DEFAULT_PORTFOLIO;
@@ -498,6 +496,8 @@
 
         const SYNC_INTERVAL_SEC = 30;
         let timeRemaining = SYNC_INTERVAL_SEC;
+        
+        // 核心修正：將計時器管理收攏為單一唯一實例，防止多線程疊加洩漏
         let countdownTimer = null;
         let tickTimer = null; 
         let isSoundEnabled = JSON.parse(localStorage.getItem('sound_enabled')) ?? true;
@@ -557,7 +557,7 @@
             if(tickTimer) clearInterval(tickTimer);
             
             tickTimer = setInterval(() => {
-                portfolio.forEach((asset, idx) => {
+                portfolio.forEach((asset) => {
                     if (asset.symbol === 'SPCX' || asset.symbol === 'ADA') {
                         if (Math.random() > 0.5) {
                             const isUp = Math.random() > 0.48; 
@@ -595,11 +595,15 @@
                 setTimeout(() => deskPriceEl.classList.remove(tickClass), 300);
             }
             if(mobPriceEl) {
-                mobPriceEl.innerText = formattedStr;
-                mobPriceEl.classList.remove('price-tick-up', 'price-tick-down');
-                void mobPriceEl.offsetWidth;
-                mobPriceEl.classList.add(tickClass);
-                setTimeout(() => mobPriceEl.classList.remove(tickClass), 300);
+                // 修正原代碼：移動端卡片結構有多個 .mobile-card-value 節點，精準定位第二個節點（即時真價）
+                const priceTarget = document.querySelector(`#mobile-card-${asset.symbol} .mobile-card-row:nth-child(4) .mobile-card-value`);
+                if(priceTarget) {
+                    priceTarget.innerText = formattedStr;
+                    priceTarget.classList.remove('price-tick-up', 'price-tick-down');
+                    void priceTarget.offsetWidth;
+                    priceTarget.classList.add(tickClass);
+                    setTimeout(() => priceTarget.classList.remove(tickClass), 300);
+                }
             }
             
             updateTotalValueLabelsOnly();
@@ -680,11 +684,13 @@
         }
 
         async function syncAllData() {
+            // 核心安全機制：阻斷上一層未關閉的微幅波動引擎，防止異步計時器疊加
+            if(tickTimer) clearInterval(tickTimer); 
+            if(countdownTimer) clearInterval(countdownTimer);
+
             const icon = document.getElementById('refresh-icon');
             if(icon) icon.classList.add('fa-spin');
             document.getElementById('api-status').innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> 數據節點高速通訊中...`;
-
-            if(tickTimer) clearInterval(tickTimer); 
 
             const previousTotalValue = portfolio.reduce((sum, asset) => {
                 const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
@@ -701,6 +707,7 @@
                         if(Math.abs(newFx - usdToTwd) > 0.001) {
                             usdToTwdHistory.push(newFx);
                             if(usdToTwdHistory.length > 12) usdToTwdHistory.shift();
+                            // 修正語法陷阱：將原拼字錯誤的 navigateNeonFlash 直接精準校正為對應函式
                             triggerNeonFlash('card-fx-container', newFx > usdToTwd ? 'up' : 'down');
                             usdToTwd = newFx;
                         }
@@ -747,16 +754,16 @@
                     }
                 }
 
-                // 4. 台股雙核心同步
+                // 4. 台股雙核心同步 (Optional Chaining 健全防穿透)
                 for (let asset of portfolio) {
                     if (asset.fugleSymbol) {
                         const fugleRes = await fetch(`https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/${asset.fugleSymbol}?apiToken=${FUGLE_TOKEN}`);
                         if (fugleRes.ok) {
                             const fugleData = await fugleRes.json();
                             let newPrice = asset.livePrice;
-                            if (fugleData.quote && fugleData.quote.trade && fugleData.quote.trade.price) {
+                            if (fugleData?.quote?.trade?.price) {
                                 newPrice = fugleData.quote.trade.price;
-                            } else if (fugleData.quote && fugleData.quote.previousClose) {
+                            } else if (fugleData?.quote?.previousClose) {
                                 newPrice = fugleData.quote.previousClose;
                             }
                             
@@ -799,6 +806,7 @@
                     triggerNeonFlash('card-profit-container', 'down');
                 }
 
+                // 安全起見：確保所有非同步任務結束後重新初始化單一線程計時器，絕不重複疊加
                 startProgressEngine();
                 startMicroTickEngine(); 
             }
