@@ -244,6 +244,7 @@
             transition: background-color 0.4s ease, color 0.4s ease, text-shadow 0.3s ease;
         }
 
+        /* 實時價格微幅波動提示色調 */
         .price-tick-up {
             color: var(--success) !important;
             text-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
@@ -255,6 +256,7 @@
             transition: none;
         }
 
+        /* 輸入框通用高階樣式 */
         .editable-input {
             background: var(--bg-input);
             border: 1px solid var(--border);
@@ -270,6 +272,29 @@
             border-color: var(--accent);
             box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
             outline: none;
+        }
+
+        /* 真價覆蓋輸入框專用樣式（去邊框化設計，滑鼠 hover 或點擊才顯現，維護視覺整潔） */
+        .price-override-input {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-main);
+            font-weight: 700;
+            font-family: monospace;
+            width: 110px;
+            padding: 0.3rem 0.5rem;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        .price-override-input:hover {
+            background: var(--bg-input);
+            border-color: var(--border);
+        }
+        .price-override-input:focus {
+            background: var(--bg-input);
+            border-color: var(--accent);
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
         }
 
         .badge {
@@ -294,6 +319,7 @@
             gap: 0.3rem;
         }
 
+        /* 數據流大規模更新時的霓虹閃爍提示特效 */
         @keyframes flash-neon-up {
             0% { background-color: rgba(16, 185, 129, 0.25); box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); border-color: var(--success); }
             100% { background-color: transparent; }
@@ -441,7 +467,7 @@
                 <div class="section-title">
                     <i class="fa-solid fa-wallet" style="color: var(--accent);"></i> 實時持倉資產明細
                 </div>
-                <span class="hint-text"><i class="fa-solid fa-bolt"></i> 富果 API & Finnhub 高速真值連動（秒級微幅波動作業）</span>
+                <span class="hint-text"><i class="fa-solid fa-bolt"></i> 富果 API & Finnhub 連動（支援點擊真價直接修改覆蓋）</span>
             </div>
 
             <div class="table-wrapper">
@@ -490,17 +516,34 @@
         const FUGLE_TOKEN = 'y2b649b1-347c-4077-a8d0-89ac6732fb65';
         const FINNHUB_TOKEN = ['d8om611r01qn89hs26s0', 'd8om611r01qn89hs26sg'].join('');
 
-        let portfolio = JSON.parse(localStorage.getItem('asset_portfolio_v7')) || DEFAULT_PORTFOLIO;
+        // 核心優化：深度合併本地快取，避免頁面重載時歷史走勢序列遭覆蓋
+        let cachedPortfolio = JSON.parse(localStorage.getItem('asset_portfolio_v8'));
+        let portfolio = DEFAULT_PORTFOLIO;
+
+        if (cachedPortfolio && Array.isArray(cachedPortfolio)) {
+            portfolio = DEFAULT_PORTFOLIO.map(def => {
+                const match = cachedPortfolio.find(c => c.symbol === def.symbol);
+                return match ? { ...def, qty: match.qty, cost: match.cost, livePrice: match.livePrice, history: match.history || def.history } : def;
+            });
+        }
+
         let usdToTwd = 32.42;
         let usdToTwdHistory = [32.35, 32.38, 32.40, 32.42];
 
         const SYNC_INTERVAL_SEC = 30;
         let timeRemaining = SYNC_INTERVAL_SEC;
         
-        // 核心修正：將計時器管理收攏為單一唯一實例，防止多線程疊加洩漏
         let countdownTimer = null;
         let tickTimer = null; 
         let isSoundEnabled = JSON.parse(localStorage.getItem('sound_enabled')) ?? true;
+
+        // 效能優化：記憶體節點字典
+        const elCache = {};
+
+        function getCachedEl(id) {
+            if (!elCache[id]) elCache[id] = document.getElementById(id);
+            return elCache[id];
+        }
 
         function formatCurrency(val) {
             return new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 }).format(val);
@@ -512,22 +555,39 @@
 
         function updateAssetValue(index, field, value) {
             portfolio[index][field] = parseFloat(value) || 0;
-            localStorage.setItem('asset_portfolio_v7', JSON.stringify(portfolio));
+            localStorage.setItem('asset_portfolio_v8', JSON.stringify(portfolio));
             calculateAndRender();
+        }
+
+        // 高階核心功能：手動點擊覆蓋市場真價
+        function overrideLivePrice(index, value) {
+            const numVal = parseFloat(value) || 0;
+            const asset = portfolio[index];
+            asset.livePrice = numVal;
+            
+            if (!asset.history) asset.history = [];
+            asset.history.push(numVal);
+            if (asset.history.length > 12) asset.history.shift();
+            
+            localStorage.setItem('asset_portfolio_v8', JSON.stringify(portfolio));
+            calculateAndRender();
+            
+            triggerNeonFlash(`row-${asset.symbol}`, 'up');
+            triggerNeonFlash(`mobile-card-${asset.symbol}`, 'up');
         }
 
         function toggleSoundMode() {
             isSoundEnabled = !isSoundEnabled;
             localStorage.setItem('sound_enabled', JSON.stringify(isSoundEnabled));
-            const icon = document.getElementById('sound-icon');
+            const icon = getCachedEl('sound-icon');
             if(icon) icon.className = isSoundEnabled ? "fa-solid fa-volume-high" : "fa-solid fa-volume-xmark";
         }
 
         function startProgressEngine() {
             if(countdownTimer) clearInterval(countdownTimer);
             
-            const progressBar = document.getElementById('sync-progress');
-            const countdownText = document.getElementById('countdown-text');
+            const progressBar = getCachedEl('sync-progress');
+            const countdownText = getCachedEl('countdown-text');
             
             timeRemaining = SYNC_INTERVAL_SEC;
             if(progressBar) progressBar.style.width = '100%';
@@ -545,7 +605,7 @@
                 if(timeRemaining <= 0) {
                     clearInterval(countdownTimer);
                     if(isSoundEnabled) {
-                        const sound = document.getElementById('refresh-sound');
+                        const sound = getCachedEl('refresh-sound');
                         if(sound) sound.play().catch(() => {});
                     }
                     syncAllData();
@@ -581,29 +641,25 @@
         }
 
         function renderSinglePriceTick(asset, direction) {
-            const deskPriceEl = document.querySelector(`#row-${asset.symbol} td:nth-child(4)`);
-            const mobPriceEl = document.querySelector(`#mobile-card-${asset.symbol} .mobile-card-value`);
+            const deskPriceInput = document.querySelector(`#row-${asset.symbol} .price-override-input`);
+            const mobPriceTarget = document.querySelector(`#mobile-card-${asset.symbol} .mobile-card-row:nth-child(4) .mobile-card-value`);
             
-            const formattedStr = (asset.currency === 'TWD' ? 'NT$' : '$') + formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3);
             const tickClass = direction === 'up' ? 'price-tick-up' : 'price-tick-down';
             
-            if(deskPriceEl) {
-                deskPriceEl.innerText = formattedStr;
-                deskPriceEl.classList.remove('price-tick-up', 'price-tick-down');
-                void deskPriceEl.offsetWidth;
-                deskPriceEl.classList.add(tickClass);
-                setTimeout(() => deskPriceEl.classList.remove(tickClass), 300);
+            if(deskPriceInput) {
+                deskPriceInput.value = formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3);
+                deskPriceInput.classList.remove('price-tick-up', 'price-tick-down');
+                void deskPriceInput.offsetWidth;
+                deskPriceInput.classList.add(tickClass);
+                setTimeout(() => deskPriceInput.classList.remove(tickClass), 300);
             }
-            if(mobPriceEl) {
-                // 修正原代碼：移動端卡片結構有多個 .mobile-card-value 節點，精準定位第二個節點（即時真價）
-                const priceTarget = document.querySelector(`#mobile-card-${asset.symbol} .mobile-card-row:nth-child(4) .mobile-card-value`);
-                if(priceTarget) {
-                    priceTarget.innerText = formattedStr;
-                    priceTarget.classList.remove('price-tick-up', 'price-tick-down');
-                    void priceTarget.offsetWidth;
-                    priceTarget.classList.add(tickClass);
-                    setTimeout(() => priceTarget.classList.remove(tickClass), 300);
-                }
+            if(mobPriceTarget) {
+                const prefix = asset.currency === 'TWD' ? 'NT$' : '$';
+                mobPriceTarget.innerText = prefix + formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3);
+                mobPriceTarget.classList.remove('price-tick-up', 'price-tick-down');
+                void mobPriceTarget.offsetWidth;
+                mobPriceTarget.classList.add(tickClass);
+                setTimeout(() => mobPriceTarget.classList.remove(tickClass), 300);
             }
             
             updateTotalValueLabelsOnly();
@@ -622,14 +678,18 @@
             
             const sign = totalProfitTWD >= 0 ? '+' : '';
             
-            document.getElementById('total-net-value').innerText = `NT$ ${formatCurrency(totalValueTWD)}`;
-            document.getElementById('total-profit').innerText = `${sign}NT$ ${formatCurrency(totalProfitTWD)}`;
-            document.getElementById('total-rate-sub').innerHTML = `<span class="${totalProfitTWD >= 0 ? 'up' : 'down'}">${sign}${formatDecimal(totalRate)}% 總投報率</span>`;
+            const totalNetValueEl = getCachedEl('total-net-value');
+            const totalProfitEl = getCachedEl('total-profit');
+            const totalRateSubEl = getCachedEl('total-rate-sub');
+
+            if(totalNetValueEl) totalNetValueEl.innerText = `NT$ ${formatCurrency(totalValueTWD)}`;
+            if(totalProfitEl) totalProfitEl.innerText = `${sign}NT$ ${formatCurrency(totalProfitTWD)}`;
+            if(totalRateSubEl) totalRateSubEl.innerHTML = `<span class="${totalProfitTWD >= 0 ? 'up' : 'down'}">${sign}${formatDecimal(totalRate)}% 總投報率</span>`;
         }
 
         function triggerManualSync() {
             if(isSoundEnabled) {
-                const sound = document.getElementById('refresh-sound');
+                const sound = getCachedEl('refresh-sound');
                 if(sound) sound.play().catch(() => {});
             }
             syncAllData();
@@ -684,13 +744,14 @@
         }
 
         async function syncAllData() {
-            // 核心安全機制：阻斷上一層未關閉的微幅波動引擎，防止異步計時器疊加
             if(tickTimer) clearInterval(tickTimer); 
             if(countdownTimer) clearInterval(countdownTimer);
 
-            const icon = document.getElementById('refresh-icon');
+            const icon = getCachedEl('refresh-icon');
             if(icon) icon.classList.add('fa-spin');
-            document.getElementById('api-status').innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> 數據節點高速通訊中...`;
+            
+            const apiStatusEl = getCachedEl('api-status');
+            if(apiStatusEl) apiStatusEl.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> 數據節點高速通訊中...`;
 
             const previousTotalValue = portfolio.reduce((sum, asset) => {
                 const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
@@ -707,7 +768,6 @@
                         if(Math.abs(newFx - usdToTwd) > 0.001) {
                             usdToTwdHistory.push(newFx);
                             if(usdToTwdHistory.length > 12) usdToTwdHistory.shift();
-                            // 修正語法陷阱：將原拼字錯誤的 navigateNeonFlash 直接精準校正為對應函式
                             triggerNeonFlash('card-fx-container', newFx > usdToTwd ? 'up' : 'down');
                             usdToTwd = newFx;
                         }
@@ -754,7 +814,7 @@
                     }
                 }
 
-                // 4. 台股雙核心同步 (Optional Chaining 健全防穿透)
+                // 4. 台股雙核心同步
                 for (let asset of portfolio) {
                     if (asset.fugleSymbol) {
                         const fugleRes = await fetch(`https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/${asset.fugleSymbol}?apiToken=${FUGLE_TOKEN}`);
@@ -783,12 +843,12 @@
                     }
                 }
 
-                document.getElementById('api-status').innerHTML = `<i class="fa-solid fa-circle-check"></i> 數據流連動完美`;
+                if(apiStatusEl) apiStatusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> 數據流連動完美`;
                 localStorage.setItem('asset_portfolio_v7', JSON.stringify(portfolio));
 
             } catch (e) {
                 console.warn("外部通訊受阻，切換安全防禦機制", e);
-                document.getElementById('api-status').innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)"></i> 本地真值模式`;
+                if(apiStatusEl) apiStatusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)"></i> 本地真值模式`;
             } finally {
                 if(icon) setTimeout(() => icon.classList.remove('fa-spin'), 800);
                 calculateAndRender();
@@ -806,7 +866,6 @@
                     triggerNeonFlash('card-profit-container', 'down');
                 }
 
-                // 安全起見：確保所有非同步任務結束後重新初始化單一線程計時器，絕不重複疊加
                 startProgressEngine();
                 startMicroTickEngine(); 
             }
@@ -823,7 +882,8 @@
             let totalCostTWD = 0;
             let totalValueTWD = 0;
 
-            document.getElementById('fx-rate').innerText = formatDecimal(usdToTwd, 2);
+            const fxRateEl = getCachedEl('fx-rate');
+            if(fxRateEl) fxRateEl.innerText = formatDecimal(usdToTwd, 2);
 
             portfolio.forEach((asset, index) => {
                 const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
@@ -842,6 +902,7 @@
                     asset.history = [asset.livePrice];
                 }
 
+                // 桌機端：將即時價格欄位改造為動態覆蓋輸入框
                 const row = document.createElement('tr');
                 row.id = `row-${asset.symbol}`;
                 row.innerHTML = `
@@ -860,7 +921,11 @@
                         <input type="number" class="editable-input" value="${asset.cost}" step="any" style="width:85px"
                             onchange="updateAssetValue(${index}, 'cost', this.value)">
                     </td>
-                    <td style="font-weight: 700; font-family: monospace;">${asset.currency === 'TWD' ? 'NT$' : '$'}${formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3)}</td>
+                    <td>
+                        <span style="font-size:0.85rem; color:var(--text-muted); font-family:monospace; font-weight:700;">${asset.currency === 'TWD' ? 'NT$' : '$'}</span>
+                        <input type="number" class="price-override-input" value="${formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3)}" step="any"
+                            onchange="overrideLivePrice(${index}, this.value)" title="點擊可直接手動修正真實市價">
+                    </td>
                     <td>
                         <canvas id="sparkline-${asset.symbol}" class="sparkline-canvas" width="110" height="36"></canvas>
                     </td>
@@ -870,6 +935,7 @@
                 `;
                 tbody.appendChild(row);
 
+                // 行動端卡片
                 const mobileCard = document.createElement('div');
                 mobileCard.className = 'mobile-asset-card';
                 mobileCard.id = `mobile-card-${asset.symbol}`;
@@ -921,15 +987,18 @@
             const totalSign = totalProfitTWD >= 0 ? '+' : '';
             const totalStatus = totalProfitTWD >= 0 ? 'up' : 'down';
 
-            document.getElementById('total-net-value').innerText = `NT$ ${formatCurrency(totalValueTWD)}`;
-            document.getElementById('total-cost-sub').innerText = `原始總成本: NT$ ${formatCurrency(totalCostTWD)}`;
-            
-            const profitDashboard = document.getElementById('total-profit');
-            profitDashboard.innerText = `${totalSign}NT$ ${formatCurrency(totalProfitTWD)}`;
-            profitDashboard.className = `card-value ${totalStatus}`;
+            const totalNetValueEl = getCachedEl('total-net-value');
+            const totalCostSubEl = getCachedEl('total-cost-sub');
+            const profitDashboard = getCachedEl('total-profit');
+            const rateSub = getCachedEl('total-rate-sub');
 
-            const rateSub = document.getElementById('total-rate-sub');
-            rateSub.innerHTML = `<span class="${totalStatus}">${totalSign}${formatDecimal(totalRate)}% 總投報率</span>`;
+            if(totalNetValueEl) totalNetValueEl.innerText = `NT$ ${formatCurrency(totalValueTWD)}`;
+            if(totalCostSubEl) totalCostSubEl.innerText = `原始總成本: NT$ ${formatCurrency(totalCostTWD)}`;
+            if(profitDashboard) {
+                profitDashboard.innerText = `${totalSign}NT$ ${formatCurrency(totalProfitTWD)}`;
+                profitDashboard.className = `card-value ${totalStatus}`;
+            }
+            if(rateSub) rateSub.innerHTML = `<span class="${totalStatus}">${totalSign}${formatDecimal(totalRate)}% 總投報率</span>`;
         }
 
         function loadMarketNews() {
@@ -966,12 +1035,12 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `AssetStream_PRO_Glow_Backup_${new Date().toISOString().slice(0,10)}.json`;
+            a.download = `AssetStream_PRO_Clean_Backup_${new Date().toISOString().slice(0,10)}.json`;
             a.click();
         }
 
         window.onload = () => {
-            const icon = document.getElementById('sound-icon');
+            const icon = getCachedEl('sound-icon');
             if(icon) icon.className = isSoundEnabled ? "fa-solid fa-volume-high" : "fa-solid fa-volume-xmark";
 
             syncAllData();
