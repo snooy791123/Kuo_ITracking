@@ -6,7 +6,7 @@
     <title>AssetStream PRO // 智能資產即時追蹤</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
+
     <style>
         :root {
             --bg-main: #0B0F19;
@@ -37,7 +37,6 @@
             min-height: 100vh;
         }
 
-        /* 頂部極光流星進度條 */
         .top-progress-container {
             width: 100%;
             height: 4px;
@@ -244,7 +243,6 @@
             transition: background-color 0.4s ease, color 0.4s ease, text-shadow 0.3s ease;
         }
 
-        /* 實時價格微幅波動提示色調 */
         .price-tick-up {
             color: var(--success) !important;
             text-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
@@ -256,7 +254,6 @@
             transition: none;
         }
 
-        /* 輸入框通用高階樣式 */
         .editable-input {
             background: var(--bg-input);
             border: 1px solid var(--border);
@@ -274,7 +271,6 @@
             outline: none;
         }
 
-        /* 真價覆蓋輸入框專用樣式（去邊框化設計，滑鼠 hover 或點擊才顯現，維護視覺整潔） */
         .price-override-input {
             background: transparent;
             border: 1px solid transparent;
@@ -319,7 +315,6 @@
             gap: 0.3rem;
         }
 
-        /* 數據流大規模更新時的霓虹閃爍提示特效 */
         @keyframes flash-neon-up {
             0% { background-color: rgba(16, 185, 129, 0.25); box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); border-color: var(--success); }
             100% { background-color: transparent; }
@@ -467,7 +462,7 @@
                 <div class="section-title">
                     <i class="fa-solid fa-wallet" style="color: var(--accent);"></i> 實時持倉資產明細
                 </div>
-                <span class="hint-text"><i class="fa-solid fa-bolt"></i> 富果 API & Finnhub 連動（支援點擊真價直接修改覆蓋）</span>
+                <span class="hint-text"><i class="fa-solid fa-bolt"></i> 多來源 API 連動（支援點擊真價直接修改覆蓋）</span>
             </div>
 
             <div class="table-wrapper">
@@ -478,7 +473,7 @@
                             <th>持有數量</th>
                             <th>買入成本</th>
                             <th>市場即時真價</th>
-                            <th>歷史走勢</th> 
+                            <th>歷史走勢</th>
                             <th>折合台幣現值</th>
                             <th>即時盈虧 (TWD)</th>
                             <th>報酬率</th>
@@ -510,20 +505,53 @@
             { symbol: '00403A', fugleSymbol: '00403A', finnhubSymbol: null, type: '台股持倉', qty: 1607, cost: 9.83, currency: 'TWD', livePrice: 10.69, history: [10.55, 10.58, 10.62, 10.65, 10.69] },
             { symbol: '00955', fugleSymbol: '00955', finnhubSymbol: null, type: '台股持倉', qty: 1166, cost: 14.96, currency: 'TWD', livePrice: 14.36, history: [14.50, 14.45, 14.40, 14.38, 14.36] },
             { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 2, cost: 158.8, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
-            { symbol: 'ADA', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 2009.37, cost: 0.183, currency: 'USDT', livePrice: 0.425, history: [0.395, 0.412, 0.408, 0.419, 0.425] }
+            { symbol: 'ADA', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 1611.24, cost: 0.189, currency: 'USDT', livePrice: 0.163, history: [0.158, 0.160, 0.161, 0.162, 0.163] }
         ];
 
-        const FUGLE_TOKEN = 'y2b649b1-347c-4077-a8d0-89ac6732fb65';
+        // Finnhub token（美股直連用）。單一 HTML 自用版，token 會出現在原始碼，
+        // 請勿把此檔公開上傳到網路；自己存電腦使用沒問題。
         const FINNHUB_TOKEN = ['d8om611r01qn89hs26s0', 'd8om611r01qn89hs26sg'].join('');
 
-        // 核心優化：深度合併本地快取，避免頁面重載時歷史走勢序列遭覆蓋
-        let cachedPortfolio = JSON.parse(localStorage.getItem('asset_portfolio_v8'));
-        let portfolio = DEFAULT_PORTFOLIO;
+        // 公開 CORS 代理清單（台股用）。依序嘗試，任一可用即成功。
+        // 某個代理若哪天失效，會自動換下一個；可自行增刪。
+        // {url} 會被替換成「已 encodeURIComponent 的目標網址」。
+        const CORS_PROXIES = [
+            'https://corsproxy.io/?url={url}',
+            'https://api.allorigins.win/raw?url={url}',
+            'https://thingproxy.freeboard.io/fetch/{rawurl}',
+            'https://api.codetabs.com/v1/proxy/?quest={url}'
+        ];
+
+        const STORAGE_KEY = 'asset_portfolio_v9';
+
+        // 深度合併本地快取：保留使用者手動編輯的「數量/成本」，
+        // 但「即時價/走勢」一律改用最新預設值起步（避免舊版過時快取價殘留），
+        // 隨後由各 API 在同步時覆蓋為真值。
+        let cachedPortfolio = null;
+        try { cachedPortfolio = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { cachedPortfolio = null; }
+
+        let portfolio = DEFAULT_PORTFOLIO.map(d => ({ ...d, history: [...d.history] }));
 
         if (cachedPortfolio && Array.isArray(cachedPortfolio)) {
             portfolio = DEFAULT_PORTFOLIO.map(def => {
                 const match = cachedPortfolio.find(c => c.symbol === def.symbol);
-                return match ? { ...def, qty: match.qty, cost: match.cost, livePrice: match.livePrice, history: match.history || def.history } : def;
+                if (!match) return { ...def, history: [...def.history] };
+
+                // 僅在快取價與預設價「同數量級」時才沿用快取，
+                // 否則(例如舊版殘留的 0.425 對上新預設 0.163)直接捨棄改用預設。
+                const cachedPrice = Number(match.livePrice);
+                const sameMagnitude = Number.isFinite(cachedPrice) && cachedPrice > 0 &&
+                    cachedPrice >= def.livePrice * 0.4 && cachedPrice <= def.livePrice * 2.5;
+
+                return {
+                    ...def,
+                    qty: match.qty ?? def.qty,
+                    cost: match.cost ?? def.cost,
+                    livePrice: sameMagnitude ? cachedPrice : def.livePrice,
+                    history: sameMagnitude && Array.isArray(match.history) && match.history.length
+                        ? match.history.slice(-12)
+                        : [...def.history]
+                };
             });
         }
 
@@ -532,17 +560,39 @@
 
         const SYNC_INTERVAL_SEC = 30;
         let timeRemaining = SYNC_INTERVAL_SEC;
-        
-        let countdownTimer = null;
-        let tickTimer = null; 
-        let isSoundEnabled = JSON.parse(localStorage.getItem('sound_enabled')) ?? true;
 
-        // 效能優化：記憶體節點字典
+        let countdownTimer = null;
+        let tickTimer = null;
+        let isSyncing = false;
+        let isSoundEnabled = JSON.parse(localStorage.getItem('sound_enabled') ?? 'true');
+
+        const HISTORY_CAP = 30;
         const elCache = {};
 
         function getCachedEl(id) {
             if (!elCache[id]) elCache[id] = document.getElementById(id);
             return elCache[id];
+        }
+
+        function persistPortfolio() {
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(portfolio)); } catch (e) {}
+        }
+
+        function pushHistory(asset, price) {
+            if (!Array.isArray(asset.history)) asset.history = [];
+            asset.history.push(price);
+            if (asset.history.length > HISTORY_CAP) asset.history.shift();
+        }
+
+        // 統一的真價更新：先比較舊價決定漲跌，再寫入新價，杜絕「先賦值後比較」的順序錯誤
+        function applyLivePrice(asset, newPrice) {
+            if (!Number.isFinite(newPrice) || newPrice <= 0) return;
+            const oldPrice = asset.livePrice;
+            if (newPrice === oldPrice) return;
+            const direction = newPrice > oldPrice ? 'up' : 'down';
+            asset.livePrice = newPrice;
+            pushHistory(asset, newPrice);
+            return direction;
         }
 
         function formatCurrency(val) {
@@ -555,142 +605,65 @@
 
         function updateAssetValue(index, field, value) {
             portfolio[index][field] = parseFloat(value) || 0;
-            localStorage.setItem('asset_portfolio_v8', JSON.stringify(portfolio));
+            persistPortfolio();
             calculateAndRender();
         }
 
-        // 高階核心功能：手動點擊覆蓋市場真價
+        // 手動點擊覆蓋市場真價
         function overrideLivePrice(index, value) {
-            const numVal = parseFloat(value) || 0;
+            const numVal = parseFloat(value);
+            if (!Number.isFinite(numVal) || numVal <= 0) { calculateAndRender(); return; }
             const asset = portfolio[index];
+            const direction = (numVal > asset.livePrice) ? 'up' : (numVal < asset.livePrice ? 'down' : 'up');
             asset.livePrice = numVal;
-            
-            if (!asset.history) asset.history = [];
-            asset.history.push(numVal);
-            if (asset.history.length > 12) asset.history.shift();
-            
-            localStorage.setItem('asset_portfolio_v8', JSON.stringify(portfolio));
+            pushHistory(asset, numVal);
+            persistPortfolio();
             calculateAndRender();
-            
-            triggerNeonFlash(`row-${asset.symbol}`, 'up');
-            triggerNeonFlash(`mobile-card-${asset.symbol}`, 'up');
+            triggerNeonFlash(`row-${asset.symbol}`, direction);
+            triggerNeonFlash(`mobile-card-${asset.symbol}`, direction);
         }
 
         function toggleSoundMode() {
             isSoundEnabled = !isSoundEnabled;
             localStorage.setItem('sound_enabled', JSON.stringify(isSoundEnabled));
             const icon = getCachedEl('sound-icon');
-            if(icon) icon.className = isSoundEnabled ? "fa-solid fa-volume-high" : "fa-solid fa-volume-xmark";
+            if (icon) icon.className = isSoundEnabled ? "fa-solid fa-volume-high" : "fa-solid fa-volume-xmark";
         }
 
         function startProgressEngine() {
-            if(countdownTimer) clearInterval(countdownTimer);
-            
+            if (countdownTimer) clearInterval(countdownTimer);
+
             const progressBar = getCachedEl('sync-progress');
             const countdownText = getCachedEl('countdown-text');
-            
+
             timeRemaining = SYNC_INTERVAL_SEC;
-            if(progressBar) progressBar.style.width = '100%';
-            if(countdownText) countdownText.innerText = timeRemaining;
+            if (progressBar) progressBar.style.width = '100%';
+            if (countdownText) countdownText.innerText = timeRemaining;
 
             countdownTimer = setInterval(() => {
                 timeRemaining--;
-                if(countdownText) countdownText.innerText = timeRemaining;
-                
-                if(progressBar) {
-                    const percentage = (timeRemaining / SYNC_INTERVAL_SEC) * 100;
+                if (countdownText) countdownText.innerText = Math.max(0, timeRemaining);
+
+                if (progressBar) {
+                    const percentage = Math.max(0, (timeRemaining / SYNC_INTERVAL_SEC) * 100);
                     progressBar.style.width = `${percentage}%`;
                 }
 
-                if(timeRemaining <= 0) {
+                if (timeRemaining <= 0) {
                     clearInterval(countdownTimer);
-                    if(isSoundEnabled) {
+                    if (isSoundEnabled) {
                         const sound = getCachedEl('refresh-sound');
-                        if(sound) sound.play().catch(() => {});
+                        if (sound) sound.play().catch(() => {});
                     }
                     syncAllData();
                 }
             }, 1000);
         }
 
-        function startMicroTickEngine() {
-            if(tickTimer) clearInterval(tickTimer);
-            
-            tickTimer = setInterval(() => {
-                portfolio.forEach((asset) => {
-                    if (asset.symbol === 'SPCX' || asset.symbol === 'ADA') {
-                        if (Math.random() > 0.5) {
-                            const isUp = Math.random() > 0.48; 
-                            const tickPercent = (Math.random() * 0.05) / 100; 
-                            const delta = asset.livePrice * tickPercent;
-                            
-                            const oldPrice = asset.livePrice;
-                            const newPrice = isUp ? oldPrice + delta : oldPrice - delta;
-                            
-                            asset.livePrice = newPrice;
-                            
-                            if (asset.history && asset.history.length > 0) {
-                                asset.history[asset.history.length - 1] = newPrice;
-                            }
-                            
-                            renderSinglePriceTick(asset, isUp ? 'up' : 'down');
-                        }
-                    }
-                });
-            }, 1500); 
-        }
-
-        function renderSinglePriceTick(asset, direction) {
-            const deskPriceInput = document.querySelector(`#row-${asset.symbol} .price-override-input`);
-            const mobPriceTarget = document.querySelector(`#mobile-card-${asset.symbol} .mobile-card-row:nth-child(4) .mobile-card-value`);
-            
-            const tickClass = direction === 'up' ? 'price-tick-up' : 'price-tick-down';
-            
-            if(deskPriceInput) {
-                deskPriceInput.value = formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3);
-                deskPriceInput.classList.remove('price-tick-up', 'price-tick-down');
-                void deskPriceInput.offsetWidth;
-                deskPriceInput.classList.add(tickClass);
-                setTimeout(() => deskPriceInput.classList.remove(tickClass), 300);
-            }
-            if(mobPriceTarget) {
-                const prefix = asset.currency === 'TWD' ? 'NT$' : '$';
-                mobPriceTarget.innerText = prefix + formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3);
-                mobPriceTarget.classList.remove('price-tick-up', 'price-tick-down');
-                void mobPriceTarget.offsetWidth;
-                mobPriceTarget.classList.add(tickClass);
-                setTimeout(() => mobPriceTarget.classList.remove(tickClass), 300);
-            }
-            
-            updateTotalValueLabelsOnly();
-        }
-
-        function updateTotalValueLabelsOnly() {
-            let totalValueTWD = 0;
-            let totalCostTWD = 0;
-            portfolio.forEach(asset => {
-                const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
-                totalValueTWD += asset.qty * asset.livePrice * fx;
-                totalCostTWD += asset.qty * asset.cost * fx;
-            });
-            const totalProfitTWD = totalValueTWD - totalCostTWD;
-            const totalRate = totalCostTWD > 0 ? (totalProfitTWD / totalCostTWD) * 100 : 0;
-            
-            const sign = totalProfitTWD >= 0 ? '+' : '';
-            
-            const totalNetValueEl = getCachedEl('total-net-value');
-            const totalProfitEl = getCachedEl('total-profit');
-            const totalRateSubEl = getCachedEl('total-rate-sub');
-
-            if(totalNetValueEl) totalNetValueEl.innerText = `NT$ ${formatCurrency(totalValueTWD)}`;
-            if(totalProfitEl) totalProfitEl.innerText = `${sign}NT$ ${formatCurrency(totalProfitTWD)}`;
-            if(totalRateSubEl) totalRateSubEl.innerHTML = `<span class="${totalProfitTWD >= 0 ? 'up' : 'down'}">${sign}${formatDecimal(totalRate)}% 總投報率</span>`;
-        }
-
         function triggerManualSync() {
-            if(isSoundEnabled) {
+            if (isSoundEnabled) {
                 const sound = getCachedEl('refresh-sound');
-                if(sound) sound.play().catch(() => {});
+                if (sound) sound.play().catch(() => {});
             }
             syncAllData();
         }
@@ -699,7 +672,7 @@
             const el = document.getElementById(elementId);
             if (!el) return;
             el.classList.remove('live-flash-up', 'live-flash-down');
-            void el.offsetWidth; 
+            void el.offsetWidth;
             if (type === 'up') el.classList.add('live-flash-up');
             if (type === 'down') el.classList.add('live-flash-down');
         }
@@ -733,7 +706,7 @@
             });
             ctx.stroke();
 
-            ctx.lineTo((priceHistory.length - 1) * width, height);
+            ctx.lineTo(width, height);
             ctx.lineTo(0, height);
             ctx.closePath();
             const gradient = ctx.createLinearGradient(0, 0, 0, height);
@@ -743,138 +716,246 @@
             ctx.fill();
         }
 
+        // 帶逾時控制的 fetch，避免單一節點卡死整個同步流程
+        async function fetchWithTimeout(url, opts = {}, ms = 8000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), ms);
+            try {
+                const res = await fetch(url, { ...opts, signal: controller.signal });
+                return res;
+            } finally {
+                clearTimeout(id);
+            }
+        }
+
+        // ===== 各來源同步（彼此獨立，單一失敗不影響其他）=====
+
+        async function syncFx() {
+            try {
+                const res = await fetchWithTimeout('https://open.er-api.com/v6/latest/USD');
+                if (!res.ok) return false;
+                const data = await res.json();
+                const newFx = data?.rates?.TWD;
+                if (Number.isFinite(newFx) && Math.abs(newFx - usdToTwd) > 0.0001) {
+                    const dir = newFx > usdToTwd ? 'up' : 'down';
+                    usdToTwdHistory.push(newFx);
+                    if (usdToTwdHistory.length > HISTORY_CAP) usdToTwdHistory.shift();
+                    usdToTwd = newFx;
+                    triggerNeonFlash('card-fx-container', dir);
+                }
+                return true;
+            } catch (e) { return false; }
+        }
+
+        // 幣安多節點備援清單：主端點被地區/CORS 擋下時，依序嘗試備援域名
+        const BINANCE_HOSTS = [
+            'https://api.binance.com',
+            'https://data-api.binance.vision',  // 公開行情專用節點，限制最少
+            'https://api1.binance.com',
+            'https://api2.binance.com',
+            'https://api3.binance.com'
+        ];
+        const CRYPTO_PAIR = 'ADAUSDT';
+
+        async function syncCrypto() {
+            const asset = portfolio.find(a => a.symbol === 'ADA');
+            if (!asset) return false;
+
+            for (const host of BINANCE_HOSTS) {
+                try {
+                    const res = await fetchWithTimeout(
+                        `${host}/api/v3/ticker/price?symbol=${CRYPTO_PAIR}`, {}, 6000
+                    );
+                    if (!res.ok) continue;
+                    const data = await res.json();
+                    // 幣安正常回傳格式：{ symbol: "ADAUSDT", price: "0.16320000" }
+                    const newPrice = parseFloat(data && data.price);
+                    if (!Number.isFinite(newPrice) || newPrice <= 0) continue;
+
+                    const dir = applyLivePrice(asset, newPrice);
+                    if (dir) {
+                        triggerNeonFlash(`row-${asset.symbol}`, dir);
+                        triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
+                    }
+                    return true;  // 任一節點成功即收工
+                } catch (e) {
+                    // 此節點失敗，續試下一個備援
+                }
+            }
+            return false;  // 全節點皆失敗，保留現有快取價
+        }
+
+        async function syncUsStock() {
+            const asset = portfolio.find(a => a.finnhubSymbol);
+            if (!asset) return false;
+            try {
+                const res = await fetchWithTimeout(`https://finnhub.io/api/v1/quote?symbol=${asset.finnhubSymbol}&token=${FINNHUB_TOKEN}`);
+                if (!res.ok) return false;
+                const data = await res.json();
+                const newPrice = parseFloat(data.c);
+                if (Number.isFinite(newPrice) && newPrice !== 0) {
+                    const dir = applyLivePrice(asset, newPrice);
+                    if (dir) {
+                        triggerNeonFlash(`row-${asset.symbol}`, dir);
+                        triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
+                    }
+                }
+                return true;
+            } catch (e) { return false; }
+        }
+
+        // 透過 CORS 代理清單依序嘗試抓取目標網址，回傳 Response（失敗回 null）
+        async function fetchViaProxies(targetUrl, timeout = 9000) {
+            const encoded = encodeURIComponent(targetUrl);
+            for (const tpl of CORS_PROXIES) {
+                const proxyUrl = tpl
+                    .replace('{url}', encoded)
+                    .replace('{rawurl}', targetUrl); // thingproxy 吃未編碼網址
+                try {
+                    const res = await fetchWithTimeout(proxyUrl, {}, timeout);
+                    if (res.ok) return res;
+                } catch (e) {
+                    // 換下一個代理
+                }
+            }
+            return null;
+        }
+
+        // 來源一：證交所即時端點（z=現價, y=昨收, o=開盤；盤後 z 可能為 "-"）
+        async function fetchTwseAll(twAssets) {
+            // 多檔一次查：tse_2330.tw|tse_0050.tw|...（先當上市，抓不到的再個別試上櫃）
+            const exch = twAssets.map(a => `tse_${a.fugleSymbol}.tw`).join('|');
+            const target = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exch}&json=1&delay=0`;
+            const res = await fetchViaProxies(target);
+            if (!res) return 0;
+
+            let data;
+            try { data = await res.json(); }
+            catch (e) {
+                // 某些代理會把 JSON 包成字串，試著再解析一次
+                try { data = JSON.parse(await res.text()); } catch (_) { return 0; }
+            }
+            const arr = data && Array.isArray(data.msgArray) ? data.msgArray : [];
+            let okCount = 0;
+            for (const item of arr) {
+                const asset = twAssets.find(a => a.fugleSymbol === item.c);
+                if (!asset) continue;
+                // z 現價優先，無效時回退昨收 y、開盤 o
+                let price = parseFloat(item.z);
+                if (!Number.isFinite(price) || price <= 0) price = parseFloat(item.y);
+                if (!Number.isFinite(price) || price <= 0) price = parseFloat(item.o);
+                if (Number.isFinite(price) && price > 0) {
+                    const dir = applyLivePrice(asset, price);
+                    if (dir) {
+                        triggerNeonFlash(`row-${asset.symbol}`, dir);
+                        triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
+                    }
+                    okCount++;
+                }
+            }
+            return okCount;
+        }
+
+        // 來源二：Yahoo（個別查，台股加 .TW，抓不到再試 .TWO）
+        async function fetchYahooOne(asset) {
+            for (const suffix of ['.TW', '.TWO']) {
+                const target = `https://query1.finance.yahoo.com/v8/finance/chart/${asset.fugleSymbol}${suffix}?interval=1d&range=1d`;
+                const res = await fetchViaProxies(target);
+                if (!res) continue;
+                let data;
+                try { data = await res.json(); }
+                catch (e) { try { data = JSON.parse(await res.text()); } catch (_) { continue; } }
+                const meta = data?.chart?.result?.[0]?.meta;
+                const price = Number(meta?.regularMarketPrice);
+                if (Number.isFinite(price) && price > 0) {
+                    const dir = applyLivePrice(asset, price);
+                    if (dir) {
+                        triggerNeonFlash(`row-${asset.symbol}`, dir);
+                        triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
+                    }
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        async function syncTwStocks() {
+            const twAssets = portfolio.filter(a => a.fugleSymbol);
+            if (!twAssets.length) return false;
+
+            // 先試證交所即時端點（最即時、一次抓多檔）
+            let got = 0;
+            try { got = await fetchTwseAll(twAssets); } catch (e) { got = 0; }
+
+            // 證交所沒全抓到時，改用 Yahoo 個別補抓
+            if (got < twAssets.length) {
+                for (const asset of twAssets) {
+                    try { await fetchYahooOne(asset); } catch (e) { /* 續下一檔 */ }
+                }
+            }
+
+            return true; // 有快取保底，不視為硬失敗
+        }
+
         async function syncAllData() {
-            if(tickTimer) clearInterval(tickTimer); 
-            if(countdownTimer) clearInterval(countdownTimer);
+            if (isSyncing) return;
+            isSyncing = true;
+
+            if (countdownTimer) clearInterval(countdownTimer);
 
             const icon = getCachedEl('refresh-icon');
-            if(icon) icon.classList.add('fa-spin');
-            
+            if (icon) icon.classList.add('fa-spin');
+
             const apiStatusEl = getCachedEl('api-status');
-            if(apiStatusEl) apiStatusEl.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> 數據節點高速通訊中...`;
+            if (apiStatusEl) apiStatusEl.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> 數據節點高速通訊中...`;
 
             const previousTotalValue = portfolio.reduce((sum, asset) => {
                 const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
                 return sum + (asset.qty * asset.livePrice * fx);
             }, 0);
 
-            try {
-                // 1. 外匯匯率核心同步
-                const backupFxRes = await fetch('https://open.er-api.com/v6/latest/USD');
-                if (backupFxRes.ok) {
-                    const fxData = await backupFxRes.json();
-                    if(fxData.rates && fxData.rates.TWD) {
-                        const newFx = fxData.rates.TWD;
-                        if(Math.abs(newFx - usdToTwd) > 0.001) {
-                            usdToTwdHistory.push(newFx);
-                            if(usdToTwdHistory.length > 12) usdToTwdHistory.shift();
-                            triggerNeonFlash('card-fx-container', newFx > usdToTwd ? 'up' : 'down');
-                            usdToTwd = newFx;
-                        }
-                    }
-                }
+            // 所有來源並行抓取，互不阻塞，速度大幅提升
+            const results = await Promise.allSettled([
+                syncFx(),
+                syncCrypto(),
+                syncUsStock(),
+                syncTwStocks()
+            ]);
 
-                // 2. 加密貨幣 ADA 同步
-                const cryptoRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=ADAUSDT');
-                if (cryptoRes.ok) {
-                    const cryptoData = await cryptoRes.json();
-                    const newPrice = parseFloat(cryptoData.price);
-                    const asset = portfolio[3];
-                    if(newPrice !== asset.livePrice) {
-                        if(!asset.history) asset.history = [];
-                        asset.history.push(newPrice);
-                        if(asset.history.length > 12) asset.history.shift();
-                        
-                        setTimeout(() => {
-                            triggerNeonFlash(`row-${asset.symbol}`, newPrice > asset.livePrice ? 'up' : 'down');
-                            triggerNeonFlash(`mobile-card-${asset.symbol}`, newPrice > asset.livePrice ? 'up' : 'down');
-                        }, 50);
-                        asset.livePrice = newPrice;
-                    }
-                }
+            const anySuccess = results.some(r => r.status === 'fulfilled' && r.value === true);
 
-                // 3. 美股 SPCX 同步
-                const finnhubRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=SPCX&token=${FINNHUB_TOKEN}`);
-                if (finnhubRes.ok) {
-                    const finnhubData = await finnhubRes.json();
-                    if (finnhubData.c && finnhubData.c !== 0) {
-                        const newPrice = parseFloat(finnhubData.c);
-                        const asset = portfolio[2];
-                        if(newPrice !== asset.livePrice) {
-                            if(!asset.history) asset.history = [];
-                            asset.history.push(newPrice);
-                            if(asset.history.length > 12) asset.history.shift();
-                            
-                            setTimeout(() => {
-                                triggerNeonFlash(`row-${asset.symbol}`, newPrice > asset.livePrice ? 'up' : 'down');
-                                triggerNeonFlash(`mobile-card-${asset.symbol}`, newPrice > asset.livePrice ? 'up' : 'down');
-                            }, 50);
-                            asset.livePrice = newPrice;
-                        }
-                    }
-                }
-
-                // 4. 台股雙核心同步
-                for (let asset of portfolio) {
-                    if (asset.fugleSymbol) {
-                        const fugleRes = await fetch(`https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/${asset.fugleSymbol}?apiToken=${FUGLE_TOKEN}`);
-                        if (fugleRes.ok) {
-                            const fugleData = await fugleRes.json();
-                            let newPrice = asset.livePrice;
-                            if (fugleData?.quote?.trade?.price) {
-                                newPrice = fugleData.quote.trade.price;
-                            } else if (fugleData?.quote?.previousClose) {
-                                newPrice = fugleData.quote.previousClose;
-                            }
-                            
-                            if(newPrice !== asset.livePrice) {
-                                if(!asset.history) asset.history = [];
-                                asset.history.push(newPrice);
-                                if(asset.history.length > 12) asset.history.shift();
-                                
-                                const upOrDown = newPrice > asset.livePrice ? 'up' : 'down';
-                                setTimeout(() => {
-                                    triggerNeonFlash(`row-${asset.symbol}`, upOrDown);
-                                    triggerNeonFlash(`mobile-card-${asset.symbol}`, upOrDown);
-                                }, 50);
-                                asset.livePrice = newPrice;
-                            }
-                        }
-                    }
-                }
-
-                if(apiStatusEl) apiStatusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> 數據流連動完美`;
-                localStorage.setItem('asset_portfolio_v7', JSON.stringify(portfolio));
-
-            } catch (e) {
-                console.warn("外部通訊受阻，切換安全防禦機制", e);
-                if(apiStatusEl) apiStatusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)"></i> 本地真值模式`;
-            } finally {
-                if(icon) setTimeout(() => icon.classList.remove('fa-spin'), 800);
-                calculateAndRender();
-                
-                const currentTotalValue = portfolio.reduce((sum, asset) => {
-                    const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
-                    return sum + (asset.qty * asset.livePrice * fx);
-                }, 0);
-                
-                if(currentTotalValue > previousTotalValue) {
-                    triggerNeonFlash('card-total-container', 'up');
-                    triggerNeonFlash('card-profit-container', 'up');
-                } else if(currentTotalValue < previousTotalValue) {
-                    triggerNeonFlash('card-total-container', 'down');
-                    triggerNeonFlash('card-profit-container', 'down');
-                }
-
-                startProgressEngine();
-                startMicroTickEngine(); 
+            if (apiStatusEl) {
+                apiStatusEl.innerHTML = anySuccess
+                    ? `<i class="fa-solid fa-circle-check"></i> 數據流連動完美`
+                    : `<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)"></i> 本地真值模式`;
             }
+
+            persistPortfolio();
+
+            if (icon) setTimeout(() => icon.classList.remove('fa-spin'), 800);
+            calculateAndRender();
+
+            const currentTotalValue = portfolio.reduce((sum, asset) => {
+                const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
+                return sum + (asset.qty * asset.livePrice * fx);
+            }, 0);
+
+            if (currentTotalValue > previousTotalValue) {
+                triggerNeonFlash('card-total-container', 'up');
+                triggerNeonFlash('card-profit-container', 'up');
+            } else if (currentTotalValue < previousTotalValue) {
+                triggerNeonFlash('card-total-container', 'down');
+                triggerNeonFlash('card-profit-container', 'down');
+            }
+
+            isSyncing = false;
+            startProgressEngine();
         }
 
         function calculateAndRender() {
             const tbody = document.getElementById('asset-table-body');
             const mobileContainer = document.getElementById('mobile-asset-list-container');
-            if(!tbody || !mobileContainer) return;
+            if (!tbody || !mobileContainer) return;
 
             tbody.innerHTML = '';
             mobileContainer.innerHTML = '';
@@ -883,7 +964,7 @@
             let totalValueTWD = 0;
 
             const fxRateEl = getCachedEl('fx-rate');
-            if(fxRateEl) fxRateEl.innerText = formatDecimal(usdToTwd, 2);
+            if (fxRateEl) fxRateEl.innerText = formatDecimal(usdToTwd, 2);
 
             portfolio.forEach((asset, index) => {
                 const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
@@ -897,12 +978,11 @@
 
                 const statusClass = profitTWD >= 0 ? 'up' : 'down';
                 const sign = profitTWD >= 0 ? '+' : '';
-                
-                if(!asset.history || asset.history.length === 0) {
+
+                if (!asset.history || asset.history.length === 0) {
                     asset.history = [asset.livePrice];
                 }
 
-                // 桌機端：將即時價格欄位改造為動態覆蓋輸入框
                 const row = document.createElement('tr');
                 row.id = `row-${asset.symbol}`;
                 row.innerHTML = `
@@ -913,7 +993,7 @@
                         </div>
                     </td>
                     <td>
-                        <input type="number" class="editable-input" value="${asset.qty}" step="any" 
+                        <input type="number" class="editable-input" value="${asset.qty}" step="any"
                             onchange="updateAssetValue(${index}, 'qty', this.value)">
                     </td>
                     <td>
@@ -923,7 +1003,7 @@
                     </td>
                     <td>
                         <span style="font-size:0.85rem; color:var(--text-muted); font-family:monospace; font-weight:700;">${asset.currency === 'TWD' ? 'NT$' : '$'}</span>
-                        <input type="number" class="price-override-input" value="${formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3)}" step="any"
+                        <input type="number" class="price-override-input" value="${formatDecimal(asset.livePrice, asset.currency === 'TWD' ? 2 : 3)}" step="any"
                             onchange="overrideLivePrice(${index}, this.value)" title="點擊可直接手動修正真實市價">
                     </td>
                     <td>
@@ -935,7 +1015,6 @@
                 `;
                 tbody.appendChild(row);
 
-                // 行動端卡片
                 const mobileCard = document.createElement('div');
                 mobileCard.className = 'mobile-asset-card';
                 mobileCard.id = `mobile-card-${asset.symbol}`;
@@ -946,7 +1025,7 @@
                     </div>
                     <div class="mobile-card-row" style="margin-top:10px;">
                         <span class="mobile-card-label">持有數量</span>
-                        <input type="number" class="editable-input" value="${asset.qty}" step="any" style="width:120px; text-align:right" 
+                        <input type="number" class="editable-input" value="${asset.qty}" step="any" style="width:120px; text-align:right"
                             onchange="updateAssetValue(${index}, 'qty', this.value)">
                     </div>
                     <div class="mobile-card-row">
@@ -960,7 +1039,8 @@
                     <div style="height:1px; background:var(--border); margin:0.6rem 0"></div>
                     <div class="mobile-card-row">
                         <span class="mobile-card-label">即時真價</span>
-                        <span class="mobile-card-value" style="font-weight:700; font-family: monospace;">${asset.currency === 'TWD' ? 'NT$' : '$'}${formatDecimal(asset.livePrice, asset.currency==='TWD'?2:3)}</span>
+                        <input type="number" class="price-override-input" value="${formatDecimal(asset.livePrice, asset.currency === 'TWD' ? 2 : 3)}" step="any" style="text-align:right; width:120px"
+                            onchange="overrideLivePrice(${index}, this.value)" title="點擊可直接手動修正真實市價">
                     </div>
                     <div class="mobile-card-row" style="margin: 0.5rem 0;">
                         <span class="mobile-card-label">走勢線</span>
@@ -977,7 +1057,8 @@
                 `;
                 mobileContainer.appendChild(mobileCard);
 
-                const isPositive = asset.livePrice >= (asset.history[asset.history.length - 2] || asset.cost);
+                const prevPrice = asset.history.length >= 2 ? asset.history[asset.history.length - 2] : asset.cost;
+                const isPositive = asset.livePrice >= prevPrice;
                 drawSparkline(`sparkline-${asset.symbol}`, asset.history, isPositive);
                 drawSparkline(`mobile-sparkline-${asset.symbol}`, asset.history, isPositive);
             });
@@ -992,18 +1073,18 @@
             const profitDashboard = getCachedEl('total-profit');
             const rateSub = getCachedEl('total-rate-sub');
 
-            if(totalNetValueEl) totalNetValueEl.innerText = `NT$ ${formatCurrency(totalValueTWD)}`;
-            if(totalCostSubEl) totalCostSubEl.innerText = `原始總成本: NT$ ${formatCurrency(totalCostTWD)}`;
-            if(profitDashboard) {
+            if (totalNetValueEl) totalNetValueEl.innerText = `NT$ ${formatCurrency(totalValueTWD)}`;
+            if (totalCostSubEl) totalCostSubEl.innerText = `原始總成本: NT$ ${formatCurrency(totalCostTWD)}`;
+            if (profitDashboard) {
                 profitDashboard.innerText = `${totalSign}NT$ ${formatCurrency(totalProfitTWD)}`;
                 profitDashboard.className = `card-value ${totalStatus}`;
             }
-            if(rateSub) rateSub.innerHTML = `<span class="${totalStatus}">${totalSign}${formatDecimal(totalRate)}% 總投報率</span>`;
+            if (rateSub) rateSub.innerHTML = `<span class="${totalStatus}">${totalSign}${formatDecimal(totalRate)}% 總投報率</span>`;
         }
 
         function loadMarketNews() {
             const newsContainer = document.getElementById('news-container');
-            if(!newsContainer) return;
+            if (!newsContainer) return;
 
             const newsData = [
                 { title: "台灣半導體與高股息 ETF 資金流向科技股，00403A、00955 獲內資強力支撐", source: "時報財經電子報", time: "20分鐘前", url: "https://news.cnyes.com" },
@@ -1018,6 +1099,7 @@
                 el.className = 'news-item';
                 el.href = item.url;
                 el.target = '_blank';
+                el.rel = 'noopener noreferrer';
                 el.innerHTML = `
                     <div class="news-title">${item.title}</div>
                     <div class="news-meta">
@@ -1031,18 +1113,20 @@
 
         function exportData() {
             const dataStr = JSON.stringify(portfolio, null, 2);
-            const blob = new Blob([dataStr], {type: "application/json"});
+            const blob = new Blob([dataStr], { type: "application/json" });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `AssetStream_PRO_Clean_Backup_${new Date().toISOString().slice(0,10)}.json`;
+            a.download = `AssetStream_PRO_Backup_${new Date().toISOString().slice(0, 10)}.json`;
             a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
 
         window.onload = () => {
             const icon = getCachedEl('sound-icon');
-            if(icon) icon.className = isSoundEnabled ? "fa-solid fa-volume-high" : "fa-solid fa-volume-xmark";
+            if (icon) icon.className = isSoundEnabled ? "fa-solid fa-volume-high" : "fa-solid fa-volume-xmark";
 
+            calculateAndRender();   // 先用快取真價即時渲染，不必等 API
             syncAllData();
             loadMarketNews();
             setInterval(loadMarketNews, 3600000);
