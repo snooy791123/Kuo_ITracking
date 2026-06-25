@@ -755,10 +755,10 @@
             'https://api2.binance.com',
             'https://api3.binance.com'
         ];
-        const CRYPTO_PAIR = 'ADAUSDT';
+        const CRYPTO_PAIR = 'KASUSDT';
 
         async function syncCrypto() {
-            const asset = portfolio.find(a => a.symbol === 'ADA');
+            const asset = portfolio.find(a => a.symbol === 'KAS');
             if (!asset) return false;
 
             for (const host of BINANCE_HOSTS) {
@@ -768,7 +768,7 @@
                     );
                     if (!res.ok) continue;
                     const data = await res.json();
-                    // 幣安正常回傳格式：{ symbol: "ADAUSDT", price: "0.16320000" }
+                    // 幣安正常回傳格式：{ symbol: "KASUSDT", price: "0.16320000" }
                     const newPrice = parseFloat(data && data.price);
                     if (!Number.isFinite(newPrice) || newPrice <= 0) continue;
 
