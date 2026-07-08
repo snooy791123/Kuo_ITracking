@@ -500,13 +500,13 @@
         </div>
     </div>
 
-const DEFAULT_PORTFOLIO = [
-    { symbol: '00403A', fugleSymbol: '00403A', finnhubSymbol: null, type: '台股持倉', qty: 1607, cost: 9.83, currency: 'TWD', livePrice: 10.69, history: [10.55, 10.58, 10.62, 10.65, 10.69] },
-    { symbol: '00955', fugleSymbol: '00955', finnhubSymbol: null, type: '台股持倉', qty: 1166, cost: 14.96, currency: 'TWD', livePrice: 14.36, history: [14.50, 14.45, 14.40, 14.38, 14.36] },
-    { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 2, cost: 158.8, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
-    { symbol: 'BSB', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 2215.49, cost: 0.13637, currency: 'USDT', livePrice: 0.1427, history: [0.138, 0.139, 0.140, 0.141, 0.1427] }
-];
-
+    <script>
+        const DEFAULT_PORTFOLIO = [
+            { symbol: '00403A', fugleSymbol: '00403A', finnhubSymbol: null, type: '台股持倉', qty: 1607, cost: 9.83, currency: 'TWD', livePrice: 10.69, history: [10.55, 10.58, 10.62, 10.65, 10.69] },
+            { symbol: '00955', fugleSymbol: '00955', finnhubSymbol: null, type: '台股持倉', qty: 1166, cost: 14.96, currency: 'TWD', livePrice: 14.36, history: [14.50, 14.45, 14.40, 14.38, 14.36] },
+            { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 2, cost: 158.8, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
+            { symbol: 'BSB', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 2215.49, cost: 0.13637, currency: 'USDT', livePrice: 0.1427, history: [0.138, 0.139, 0.140, 0.141, 0.1427] }
+        ];
 
         // Finnhub token（美股直連用）。單一 HTML 自用版，token 會出現在原始碼，
         // 請勿把此檔公開上傳到網路；自己存電腦使用沒問題。
@@ -522,7 +522,8 @@ const DEFAULT_PORTFOLIO = [
             'https://api.codetabs.com/v1/proxy/?quest={url}'
         ];
 
-        const STORAGE_KEY = 'asset_portfolio_v9';
+        // 將快取金鑰更新至 v10，強制載入新的 BSB 設定
+        const STORAGE_KEY = 'asset_portfolio_v10';
 
         // 深度合併本地快取：保留使用者手動編輯的「數量/成本」，
         // 但「即時價/走勢」一律改用最新預設值起步（避免舊版過時快取價殘留），
@@ -538,7 +539,7 @@ const DEFAULT_PORTFOLIO = [
                 if (!match) return { ...def, history: [...def.history] };
 
                 // 僅在快取價與預設價「同數量級」時才沿用快取，
-                // 否則(例如舊版殘留的 0.163 對上新預設 0.0288)直接捨棄改用預設。
+                // 否則直接捨棄改用預設。
                 const cachedPrice = Number(match.livePrice);
                 const sameMagnitude = Number.isFinite(cachedPrice) && cachedPrice > 0 &&
                     cachedPrice >= def.livePrice * 0.4 && cachedPrice <= def.livePrice * 2.5;
@@ -768,7 +769,7 @@ const DEFAULT_PORTFOLIO = [
                     );
                     if (!res.ok) continue;
                     const data = await res.json();
-                    // 幣安正常回傳格式：{ symbol: "BSBUSDT", price: "0.13768" }
+                    // 幣安正常回傳格式：{ symbol: "BSBUSDT", price: "0.14270000" }
                     const newPrice = parseFloat(data && data.price);
                     if (!Number.isFinite(newPrice) || newPrice <= 0) continue;
 
@@ -1089,7 +1090,7 @@ const DEFAULT_PORTFOLIO = [
             const newsData = [
                 { title: "台灣半導體與高股息 ETF 資金流向科技股，00403A、00955 獲內資強力支撐", source: "時報財經電子報", time: "20分鐘前", url: "https://news.cnyes.com" },
                 { title: "聯準會最新利率決議釋出降息訊號，美股科技股與 SPCX 淨值重回多頭上升軌道", source: "華爾街見聞", time: "1小時前", url: "https://www.wallstreetcn.com" },
-                { title: "Kaspa (KAS) 主網 Crescendo 升級後出塊效能提升，blockDAG 生態交易量穩步成長", source: "區塊客", time: "25分鐘前", url: "https://www.kaspa.org" },
+                { title: "加密貨幣市場回溫，Block Street (BSB) 生態交易量與持倉地址穩步成長", source: "區塊客", time: "25分鐘前", url: "https://blockcast.it/" },
                 { title: "外匯市場動態：新台幣兌美元匯率受外資進出影響，短期於當前區塊強勢震盪", source: "經濟日報", time: "42分鐘前", url: "https://money.udn.com" }
             ];
 
