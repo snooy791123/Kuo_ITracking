@@ -503,9 +503,9 @@
     <script>
         const DEFAULT_PORTFOLIO = [
             { symbol: '00403A', fugleSymbol: '00403A', finnhubSymbol: null, type: '台股持倉', qty: 1607, cost: 9.83, currency: 'TWD', livePrice: 10.69, history: [10.55, 10.58, 10.62, 10.65, 10.69] },
-            { symbol: '00955', fugleSymbol: '00955', finnhubSymbol: null, type: '台股持倉', qty: 1166, cost: 14.96, currency: 'TWD', livePrice: 14.36, history: [14.50, 14.45, 14.40, 14.38, 14.36] },
-            { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 7, cost: 142.13, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
-            { symbol: 'KAS', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 11097.44, cost: 0.02929, currency: 'USDT', livePrice: 0.0288, history: [0.0301, 0.0295, 0.0291, 0.0289, 0.0288] }
+            { symbol: '00955', fugleSymbol: '00955', finnhubSymbol: null, type: '台股持倉', qty: 500, cost: 14.51, currency: 'TWD', livePrice: 14.36, history: [14.50, 14.45, 14.40, 14.38, 14.36] },
+            { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 10, cost: 133.63, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
+            { symbol: 'KAS', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 11097, cost: 0.02929, currency: 'USDT', livePrice: 0.0295, history: [0.0301, 0.0298, 0.0296, 0.0294, 0.0295] }
         ];
 
         // Finnhub token（美股直連用）。單一 HTML 自用版，token 會出現在原始碼，
@@ -522,7 +522,8 @@
             'https://api.codetabs.com/v1/proxy/?quest={url}'
         ];
 
-        const STORAGE_KEY = 'asset_portfolio_v9';
+        // 版本號提升為 v10：持倉數量/成本已更新，需捨棄舊快取才不會被覆蓋回舊值
+        const STORAGE_KEY = 'asset_portfolio_v10';
 
         // 深度合併本地快取：保留使用者手動編輯的「數量/成本」，
         // 但「即時價/走勢」一律改用最新預設值起步（避免舊版過時快取價殘留），
@@ -1133,4 +1134,4 @@
         };
     </script>
 </body>
-</html
+</html>
