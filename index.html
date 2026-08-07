@@ -504,7 +504,7 @@
         const DEFAULT_PORTFOLIO = [
             { symbol: '00405A', fugleSymbol: '00405A', finnhubSymbol: null, type: '台股持倉', qty: 3000, cost: 8.08, currency: 'TWD', livePrice: 8.08, history: [8.05, 8.06, 8.07, 8.08, 8.08] },
             { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 10, cost: 133.63, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
-            { symbol: 'KAS', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 11097, cost: 0.02929, currency: 'USDT', livePrice: 0.0295, history: [0.0301, 0.0298, 0.0296, 0.0294, 0.0295] }
+            { symbol: 'KAS', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 11097, cost: 0.02929, currency: 'USDT', livePrice: 0.0261, history: [0.0272, 0.0268, 0.0265, 0.0263, 0.0261] }
         ];
 
         // Finnhub token（美股直連用）。單一 HTML 自用版，token 會出現在原始碼，
@@ -521,7 +521,7 @@
             'https://api.codetabs.com/v1/proxy/?quest={url}'
         ];
 
-        // 版本號提升為 v12：持倉數量/成本已更新，需捨棄舊快取才不會被覆蓋回舊值
+        // 版本號提升為 v10：持倉數量/成本已更新，需捨棄舊快取才不會被覆蓋回舊值
         const STORAGE_KEY = 'asset_portfolio_v12';
 
         // 深度合併本地快取：保留使用者手動編輯的「數量/成本」，
@@ -749,40 +749,72 @@
 
         // 幣安多節點備援清單：主端點被地區/CORS 擋下時，依序嘗試備援域名
         const BINANCE_HOSTS = [
+            'https://data-api.binance.vision',  // 公開行情專用節點，CORS 最友善，優先
             'https://api.binance.com',
-            'https://data-api.binance.vision',  // 公開行情專用節點，限制最少
             'https://api1.binance.com',
             'https://api2.binance.com',
             'https://api3.binance.com'
         ];
         const CRYPTO_PAIR = 'KASUSDT';
+        const COINGECKO_ID = 'kaspa';       // CoinGecko 幣種 id
+        const COINBASE_PAIR = 'KAS-USD';    // Coinbase 現貨對
+
+        // 幣安：回傳 { symbol, price }
+        async function fetchBinanceKas() {
+            for (const host of BINANCE_HOSTS) {
+                try {
+                    const res = await fetchWithTimeout(`${host}/api/v3/ticker/price?symbol=${CRYPTO_PAIR}`, {}, 5000);
+                    if (!res.ok) continue;
+                    const data = await res.json();
+                    const p = parseFloat(data && data.price);
+                    if (Number.isFinite(p) && p > 0) return p;
+                } catch (e) { /* 續試下一個幣安節點 */ }
+            }
+            return null;
+        }
+
+        // CoinGecko：免 key、支援 CORS，回傳 { kaspa: { usd: 0.026 } }
+        async function fetchCoingeckoKas() {
+            try {
+                const res = await fetchWithTimeout(
+                    `https://api.coingecko.com/api/v3/simple/price?ids=${COINGECKO_ID}&vs_currencies=usd`, {}, 6000
+                );
+                if (!res.ok) return null;
+                const data = await res.json();
+                const p = parseFloat(data?.[COINGECKO_ID]?.usd);
+                return (Number.isFinite(p) && p > 0) ? p : null;
+            } catch (e) { return null; }
+        }
+
+        // Coinbase：支援 CORS，回傳 { data: { amount: "0.026" } }
+        async function fetchCoinbaseKas() {
+            try {
+                const res = await fetchWithTimeout(`https://api.coinbase.com/v2/prices/${COINBASE_PAIR}/spot`, {}, 6000);
+                if (!res.ok) return null;
+                const data = await res.json();
+                const p = parseFloat(data?.data?.amount);
+                return (Number.isFinite(p) && p > 0) ? p : null;
+            } catch (e) { return null; }
+        }
 
         async function syncCrypto() {
             const asset = portfolio.find(a => a.symbol === 'KAS');
             if (!asset) return false;
 
-            for (const host of BINANCE_HOSTS) {
-                try {
-                    const res = await fetchWithTimeout(
-                        `${host}/api/v3/ticker/price?symbol=${CRYPTO_PAIR}`, {}, 6000
-                    );
-                    if (!res.ok) continue;
-                    const data = await res.json();
-                    // 幣安正常回傳格式：{ symbol: "KASUSDT", price: "0.02880000" }
-                    const newPrice = parseFloat(data && data.price);
-                    if (!Number.isFinite(newPrice) || newPrice <= 0) continue;
+            // 三道防線依序嘗試：幣安 → CoinGecko → Coinbase，任一成功即用
+            let newPrice = await fetchBinanceKas();
+            let src = 'binance';
+            if (newPrice === null) { newPrice = await fetchCoingeckoKas(); src = 'coingecko'; }
+            if (newPrice === null) { newPrice = await fetchCoinbaseKas(); src = 'coinbase'; }
 
-                    const dir = applyLivePrice(asset, newPrice);
-                    if (dir) {
-                        triggerNeonFlash(`row-${asset.symbol}`, dir);
-                        triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
-                    }
-                    return true;  // 任一節點成功即收工
-                } catch (e) {
-                    // 此節點失敗，續試下一個備援
-                }
+            if (newPrice === null) return false; // 三家全失敗，保留快取價
+
+            const dir = applyLivePrice(asset, newPrice);
+            if (dir) {
+                triggerNeonFlash(`row-${asset.symbol}`, dir);
+                triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
             }
-            return false;  // 全節點皆失敗，保留現有快取價
+            return true;
         }
 
         async function syncUsStock() {
