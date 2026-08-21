@@ -504,7 +504,7 @@
         const DEFAULT_PORTFOLIO = [
             { symbol: '00405A', fugleSymbol: '00405A', finnhubSymbol: null, type: '台股持倉', qty: 3650, cost: 8.0764, currency: 'TWD', livePrice: 8.08, history: [8.05, 8.06, 8.07, 8.08, 8.08] },
             { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 10, cost: 133.63, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
-            { symbol: 'KAS', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 11610.76, cost: 0.02528, currency: 'USDT', livePrice: 0.0261, history: [0.0272, 0.0268, 0.0265, 0.0263, 0.0261] }
+            { symbol: 'SNEK', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 948310.6075, cost: 0.0003610, currency: 'USDT', livePrice: 0.0003247, history: [0.0003011, 0.0003100, 0.0003180, 0.0003220, 0.0003247] }
         ];
 
         // Finnhub token（美股直連用）。單一 HTML 自用版，token 會出現在原始碼，
@@ -521,7 +521,7 @@
             'https://api.codetabs.com/v1/proxy/?quest={url}'
         ];
 
-        // 版本號提升為 v14：確保使用者手動修改過的最新持有數量與成本生效
+        // 版本號提升為 v10：持倉數量/成本已更新，需捨棄舊快取才不會被覆蓋回舊值
         const STORAGE_KEY = 'asset_portfolio_v14';
 
         // 深度合併本地快取：保留使用者手動編輯的「數量/成本」，
@@ -755,12 +755,40 @@
             'https://api2.binance.com',
             'https://api3.binance.com'
         ];
-        const CRYPTO_PAIR = 'KASUSDT';
-        const COINGECKO_ID = 'kaspa';       // CoinGecko 幣種 id
-        const COINBASE_PAIR = 'KAS-USD';    // Coinbase 現貨對
+        // 以 MEXC 交易所的 SNEK/USDT 為主要價格來源；CoinGecko 為備援，
+        // 幣安保留在最後一關（SNEK 目前未在幣安掛牌，失敗也無妨）。
+        const CRYPTO_PAIR = 'SNEKUSDT';       // 若幣安未來上架 SNEK 現貨對可用
+        const COINGECKO_ID = 'snek';          // CoinGecko 幣種 id（Cardano 生態版，非 based-snek / eth-snek）
+        const MEXC_PAIR = 'SNEKUSDT';         // MEXC 現貨對（主要來源）
 
-        // 幣安：回傳 { symbol, price }
-        async function fetchBinanceKas() {
+        // CoinGecko：免 key、支援 CORS，回傳 { snek: { usd: 0.0003 } }（備援來源）
+        async function fetchCoingeckoSnek() {
+            try {
+                const res = await fetchWithTimeout(
+                    `https://api.coingecko.com/api/v3/simple/price?ids=${COINGECKO_ID}&vs_currencies=usd`, {}, 6000
+                );
+                if (!res.ok) return null;
+                const data = await res.json();
+                const p = parseFloat(data?.[COINGECKO_ID]?.usd);
+                return (Number.isFinite(p) && p > 0) ? p : null;
+            } catch (e) { return null; }
+        }
+
+        // MEXC：免 key、支援 CORS，回傳 { symbol, price }（主要來源，SNEK/USDT 現貨）
+        async function fetchMexcSnek() {
+            try {
+                const res = await fetchWithTimeout(
+                    `https://api.mexc.com/api/v3/ticker/price?symbol=${MEXC_PAIR}`, {}, 6000
+                );
+                if (!res.ok) return null;
+                const data = await res.json();
+                const p = parseFloat(data && data.price);
+                return (Number.isFinite(p) && p > 0) ? p : null;
+            } catch (e) { return null; }
+        }
+
+        // 幣安：SNEK 目前未在幣安掛牌，此關預期會失敗，保留作為未來上架時的自動備援
+        async function fetchBinanceSnek() {
             for (const host of BINANCE_HOSTS) {
                 try {
                     const res = await fetchWithTimeout(`${host}/api/v3/ticker/price?symbol=${CRYPTO_PAIR}`, {}, 5000);
@@ -773,39 +801,14 @@
             return null;
         }
 
-        // CoinGecko：免 key、支援 CORS，回傳 { kaspa: { usd: 0.026 } }
-        async function fetchCoingeckoKas() {
-            try {
-                const res = await fetchWithTimeout(
-                    `https://api.coingecko.com/api/v3/simple/price?ids=${COINGECKO_ID}&vs_currencies=usd`, {}, 6000
-                );
-                if (!res.ok) return null;
-                const data = await res.json();
-                const p = parseFloat(data?.[COINGECKO_ID]?.usd);
-                return (Number.isFinite(p) && p > 0) ? p : null;
-            } catch (e) { return null; }
-        }
-
-        // Coinbase：支援 CORS，回傳 { data: { amount: "0.026" } }
-        async function fetchCoinbaseKas() {
-            try {
-                const res = await fetchWithTimeout(`https://api.coinbase.com/v2/prices/${COINBASE_PAIR}/spot`, {}, 6000);
-                if (!res.ok) return null;
-                const data = await res.json();
-                const p = parseFloat(data?.data?.amount);
-                return (Number.isFinite(p) && p > 0) ? p : null;
-            } catch (e) { return null; }
-        }
-
         async function syncCrypto() {
-            const asset = portfolio.find(a => a.symbol === 'KAS');
+            const asset = portfolio.find(a => a.symbol === 'SNEK');
             if (!asset) return false;
 
-            // 三道防線依序嘗試：幣安 → CoinGecko → Coinbase，任一成功即用
-            let newPrice = await fetchBinanceKas();
-            let src = 'binance';
-            if (newPrice === null) { newPrice = await fetchCoingeckoKas(); src = 'coingecko'; }
-            if (newPrice === null) { newPrice = await fetchCoinbaseKas(); src = 'coinbase'; }
+            // 以 MEXC 交易所 SNEK/USDT 為主要來源；CoinGecko、幣安作備援
+            let newPrice = await fetchMexcSnek();
+            if (newPrice === null) newPrice = await fetchCoingeckoSnek();
+            if (newPrice === null) newPrice = await fetchBinanceSnek();
 
             if (newPrice === null) return false; // 三家全失敗，保留快取價
 
@@ -1121,7 +1124,7 @@
             const newsData = [
                 { title: "台灣半導體與高股息 ETF 資金流向科技股，00405A 獲內資強力支撐", source: "時報財經電子報", time: "20分鐘前", url: "https://news.cnyes.com" },
                 { title: "聯準會最新利率決議釋出降息訊號，美股科技股與 SPCX 淨值重回多頭上升軌道", source: "華爾街見聞", time: "1小時前", url: "https://www.wallstreetcn.com" },
-                { title: "Kaspa (KAS) 主網 Crescendo 升級後出塊效能提升，blockDAG 生態交易量穩步成長", source: "區塊客", time: "25分鐘前", url: "https://www.kaspa.org" },
+                { title: "Snek (SNEK) 獲 Cardano 基金會挹注資金推動全球交易所上架，生態聲量持續擴大", source: "區塊客", time: "25分鐘前", url: "https://www.snek.com" },
                 { title: "外匯市場動態：新台幣兌美元匯率受外資進出影響，短期於當前區塊強勢震盪", source: "經濟日報", time: "42分鐘前", url: "https://money.udn.com" }
             ];
 
