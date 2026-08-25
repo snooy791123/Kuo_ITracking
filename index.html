@@ -504,7 +504,7 @@
         const DEFAULT_PORTFOLIO = [
             { symbol: '00405A', fugleSymbol: '00405A', finnhubSymbol: null, type: '台股持倉', qty: 3650, cost: 8.0764, currency: 'TWD', livePrice: 8.08, history: [8.05, 8.06, 8.07, 8.08, 8.08] },
             { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 10, cost: 133.63, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
-            { symbol: 'ALT', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 63295.33, cost: 0.0065, currency: 'USDT', livePrice: 0.00649, history: [0.00668, 0.00661, 0.00655, 0.00652, 0.00649] }
+            { symbol: 'ALT', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 63296.13, cost: 0.0065, currency: 'USDT', livePrice: 0.00649, history: [0.00668, 0.00661, 0.00655, 0.00652, 0.00649], staking: { apy: 0.01, baseQty: 63296.13, baseTime: Date.now() } }
         ];
 
         // Finnhub token（美股直連用）。單一 HTML 自用版，token 會出現在原始碼，
@@ -543,6 +543,12 @@
                 const sameMagnitude = Number.isFinite(cachedPrice) && cachedPrice > 0 &&
                     cachedPrice >= def.livePrice * 0.4 && cachedPrice <= def.livePrice * 2.5;
 
+                // 質押/複利標的：staking 設定（baseQty、baseTime）以快取為準延續，
+                // 使複利基準不因重新整理頁面而重置；qty 之後由 applyStakingCompound() 動態算出。
+                const staking = match.staking && Number.isFinite(match.staking.baseQty) && Number.isFinite(match.staking.baseTime)
+                    ? { apy: def.staking?.apy ?? match.staking.apy, baseQty: match.staking.baseQty, baseTime: match.staking.baseTime }
+                    : (def.staking ? { ...def.staking } : undefined);
+
                 return {
                     ...def,
                     qty: match.qty ?? def.qty,
@@ -550,10 +556,29 @@
                     livePrice: sameMagnitude ? cachedPrice : def.livePrice,
                     history: sameMagnitude && Array.isArray(match.history) && match.history.length
                         ? match.history.slice(-12)
-                        : [...def.history]
+                        : [...def.history],
+                    ...(staking ? { staking } : {})
                 };
             });
         }
+
+        // 質押/複利計算：以 baseQty、baseTime 為基準，用「年化利率拆每小時複利」
+        // 算出到目前為止經過的小時數對應的數量，寫回 asset.qty。
+        // 呼叫多次是安全的（每次都是從固定基準重新算，不會累加誤差）。
+        function applyStakingCompound(asset) {
+            const s = asset.staking;
+            if (!s || !Number.isFinite(s.apy) || !Number.isFinite(s.baseQty) || !Number.isFinite(s.baseTime)) return;
+
+            const hourlyRate = Math.pow(1 + s.apy, 1 / 8760) - 1;
+            const hoursElapsed = Math.max(0, (Date.now() - s.baseTime) / 3600000);
+            const newQty = s.baseQty * Math.pow(1 + hourlyRate, hoursElapsed);
+
+            if (Number.isFinite(newQty) && newQty > 0) asset.qty = newQty;
+        }
+
+        // 頁面載入時，先把所有有 staking 設定的資產複利補算到「現在」，
+        // 這樣就算隔了幾小時、幾天沒開，數量也會一次補齊，不必一直開著頁面等。
+        portfolio.forEach(a => { if (a.staking) applyStakingCompound(a); });
 
         let usdToTwd = 32.42;
         let usdToTwdHistory = [32.35, 32.38, 32.40, 32.42];
@@ -605,6 +630,13 @@
 
         function updateAssetValue(index, field, value) {
             portfolio[index][field] = parseFloat(value) || 0;
+            // 若使用者手動改動「有複利設定」資產的數量，代表本金異動（存入/提領），
+            // 把複利基準重設為新數量、現在時間，之後的複利從這個新起點繼續算，
+            // 否則下一次複利計算會直接覆蓋掉使用者剛輸入的值。
+            const asset = portfolio[index];
+            if (field === 'qty' && asset.staking) {
+                asset.staking = { ...asset.staking, baseQty: asset.qty, baseTime: Date.now() };
+            }
             persistPortfolio();
             calculateAndRender();
         }
@@ -947,6 +979,9 @@
                 return sum + (asset.qty * asset.livePrice * fx);
             }, 0);
 
+            // 質押/複利數量隨每次同步一併更新（與價格同一節奏，約每 30 秒）
+            portfolio.forEach(a => { if (a.staking) applyStakingCompound(a); });
+
             // 所有來源並行抓取，互不阻塞，速度大幅提升
             const results = await Promise.allSettled([
                 syncFx(),
@@ -1022,7 +1057,7 @@
                     <td>
                         <div class="asset-name">
                             <span class="asset-symbol" style="font-weight:700;">${asset.symbol}</span>
-                            <span class="asset-type" style="display:block; font-size:0.75rem; color:var(--text-muted); margin-top:2px;">${asset.type} · <span class="badge ${asset.currency.toLowerCase()}">${asset.currency}</span></span>
+                            <span class="asset-type" style="display:block; font-size:0.75rem; color:var(--text-muted); margin-top:2px;">${asset.type} · <span class="badge ${asset.currency.toLowerCase()}">${asset.currency}</span>${asset.staking ? ` · <span class="badge" style="background:rgba(139,92,246,0.15); color:#A78BFA;" title="年化 ${(asset.staking.apy*100).toFixed(1)}%，每小時自動複利">🔄 複利中</span>` : ''}</span>
                         </div>
                     </td>
                     <td>
@@ -1053,7 +1088,7 @@
                 mobileCard.id = `mobile-card-${asset.symbol}`;
                 mobileCard.innerHTML = `
                     <div class="mobile-card-row">
-                        <span style="font-weight:700; font-size:1.05rem">${asset.symbol} <span class="badge ${asset.currency.toLowerCase()}" style="font-size:0.65rem; vertical-align:middle; margin-left:4px">${asset.currency}</span></span>
+                        <span style="font-weight:700; font-size:1.05rem">${asset.symbol} <span class="badge ${asset.currency.toLowerCase()}" style="font-size:0.65rem; vertical-align:middle; margin-left:4px">${asset.currency}</span>${asset.staking ? ` <span class="badge" style="font-size:0.65rem; vertical-align:middle; background:rgba(139,92,246,0.15); color:#A78BFA;">🔄 複利中</span>` : ''}</span>
                         <span style="font-size:0.75rem; color:var(--text-muted)">${asset.type}</span>
                     </div>
                     <div class="mobile-card-row" style="margin-top:10px;">
