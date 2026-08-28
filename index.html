@@ -504,7 +504,7 @@
         const DEFAULT_PORTFOLIO = [
             { symbol: '00405A', fugleSymbol: '00405A', finnhubSymbol: null, type: '台股持倉', qty: 3650, cost: 8.0764, currency: 'TWD', livePrice: 8.08, history: [8.05, 8.06, 8.07, 8.08, 8.08] },
             { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 10, cost: 133.63, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
-            { symbol: 'ADA', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 2019.56, cost: 0.2144, currency: 'USDT', livePrice: 0.2155, history: [0.2083, 0.2109, 0.2130, 0.2145, 0.2155] }
+            { symbol: 'ARB', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 4697.84, cost: 0.0904, currency: 'USDT', livePrice: 0.0927, history: [0.0862, 0.0880, 0.0897, 0.0912, 0.0927], staking: { apy: 0.01, baseQty: 4697.84, baseTime: null, startTime: Date.now() + (72 * 60000) } }
         ];
 
         // Finnhub token（美股直連用）。單一 HTML 自用版，token 會出現在原始碼，
@@ -522,7 +522,7 @@
         ];
 
         // 版本號提升為 v10：持倉數量/成本已更新，需捨棄舊快取才不會被覆蓋回舊值
-        const STORAGE_KEY = 'asset_portfolio_v18';
+        const STORAGE_KEY = 'asset_portfolio_v19';
 
         // 深度合併本地快取：保留使用者手動編輯的「數量/成本」，
         // 但「即時價/走勢」一律改用最新預設值起步（避免舊版過時快取價殘留），
@@ -543,10 +543,16 @@
                 const sameMagnitude = Number.isFinite(cachedPrice) && cachedPrice > 0 &&
                     cachedPrice >= def.livePrice * 0.4 && cachedPrice <= def.livePrice * 2.5;
 
-                // 質押/複利標的：staking 設定（baseQty、baseTime）以快取為準延續，
-                // 使複利基準不因重新整理頁面而重置；qty 之後由 applyStakingCompound() 動態算出。
-                const staking = match.staking && Number.isFinite(match.staking.baseQty) && Number.isFinite(match.staking.baseTime)
-                    ? { apy: def.staking?.apy ?? match.staking.apy, baseQty: match.staking.baseQty, baseTime: match.staking.baseTime }
+                // 質押/複利標的：staking 設定以快取為準延續（含尚未啟動時的 baseTime=null、
+                // startTime 未來時刻），使複利基準與預定啟動時間不因重新整理頁面而跑掉；
+                // qty 之後由 applyStakingCompound() 動態算出。
+                const staking = match.staking
+                    ? {
+                        apy: def.staking?.apy ?? match.staking.apy,
+                        baseQty: Number.isFinite(match.staking.baseQty) ? match.staking.baseQty : def.staking?.baseQty,
+                        baseTime: Number.isFinite(match.staking.baseTime) ? match.staking.baseTime : null,
+                        startTime: Number.isFinite(match.staking.startTime) ? match.staking.startTime : (def.staking?.startTime ?? null)
+                    }
                     : (def.staking ? { ...def.staking } : undefined);
 
                 return {
@@ -562,15 +568,31 @@
             });
         }
 
-        // 質押/複利計算：以 baseQty、baseTime 為基準，用「年化利率拆每小時複利」
-        // 算出到目前為止經過的小時數對應的數量，寫回 asset.qty。
-        // 呼叫多次是安全的（每次都是從固定基準重新算，不會累加誤差）。
+        // 質押/複利計算：支援「延遲啟動」——staking.startTime 若設定為未來時刻，
+        // 在那之前 qty 維持不動；一旦目前時間跨過 startTime，把複利基準（baseTime）
+        // 鎖定為「原訂的啟動時刻」而非「現在」，確保不會因晚點開網頁而少算複利。
+        // 之後以 baseQty、baseTime 為基準，用「年化利率拆每小時複利」算出到目前經過的
+        // 小時數對應的數量，寫回 asset.qty。呼叫多次是安全的（每次都從固定基準重新算）。
         function applyStakingCompound(asset) {
             const s = asset.staking;
-            if (!s || !Number.isFinite(s.apy) || !Number.isFinite(s.baseQty) || !Number.isFinite(s.baseTime)) return;
+            if (!s || !Number.isFinite(s.apy) || !Number.isFinite(s.baseQty)) return;
+
+            const now = Date.now();
+
+            // 尚未到啟動時刻：維持原始數量，不動
+            if (Number.isFinite(s.startTime) && now < s.startTime) {
+                asset.qty = s.baseQty;
+                return;
+            }
+
+            // 剛跨過啟動時刻、尚未鎖定基準時間：以「原訂啟動時刻」為準（不是現在），
+            // 這樣即使晚幾分鐘才打開頁面，複利仍從正確的起點開始算，不會少算。
+            if (!Number.isFinite(s.baseTime)) {
+                s.baseTime = Number.isFinite(s.startTime) ? s.startTime : now;
+            }
 
             const hourlyRate = Math.pow(1 + s.apy, 1 / 8760) - 1;
-            const hoursElapsed = Math.max(0, (Date.now() - s.baseTime) / 3600000);
+            const hoursElapsed = Math.max(0, (now - s.baseTime) / 3600000);
             const newQty = s.baseQty * Math.pow(1 + hourlyRate, hoursElapsed);
 
             if (Number.isFinite(newQty) && newQty > 0) asset.qty = newQty;
@@ -631,11 +653,17 @@
         function updateAssetValue(index, field, value) {
             portfolio[index][field] = parseFloat(value) || 0;
             // 若使用者手動改動「有複利設定」資產的數量，代表本金異動（存入/提領），
-            // 把複利基準重設為新數量、現在時間，之後的複利從這個新起點繼續算，
-            // 否則下一次複利計算會直接覆蓋掉使用者剛輸入的值。
+            // 更新複利基準數量；若複利已啟動（已過 startTime），基準時間重設為現在，
+            // 之後從這個新起點繼續複利；若複利尚未開始（還沒到 startTime），
+            // 僅更新基準數量、不動 baseTime，維持原訂的延遲啟動時刻。
             const asset = portfolio[index];
             if (field === 'qty' && asset.staking) {
-                asset.staking = { ...asset.staking, baseQty: asset.qty, baseTime: Date.now() };
+                const started = Number.isFinite(asset.staking.startTime) ? Date.now() >= asset.staking.startTime : true;
+                asset.staking = {
+                    ...asset.staking,
+                    baseQty: asset.qty,
+                    baseTime: started ? Date.now() : null
+                };
             }
             persistPortfolio();
             calculateAndRender();
@@ -787,14 +815,14 @@
             'https://api2.binance.com',
             'https://api3.binance.com'
         ];
-        // ADA（Cardano）在幣安有正式現貨掛牌，以幣安為主要來源；
+        // ARB（Arbitrum，非其他同代號幣）在幣安有正式現貨掛牌，以幣安為主要來源；
         // CoinGecko、Coinbase 作備援（避免幣安在部分地區/瀏覽器環境被擋時整條斷線）。
-        const CRYPTO_PAIR = 'ADAUSDT';        // 幣安現貨對（主要來源）
-        const COINGECKO_ID = 'cardano';       // CoinGecko 幣種 id
-        const COINBASE_PAIR = 'ADA-USD';      // Coinbase 現貨對（備援）
+        const CRYPTO_PAIR = 'ARBUSDT';        // 幣安現貨對（主要來源）
+        const COINGECKO_ID = 'arbitrum';      // CoinGecko 幣種 id（已核對：Arbitrum L2 治理代幣）
+        const COINBASE_PAIR = 'ARB-USD';      // Coinbase 現貨對（備援）
 
         // 幣安：回傳 { symbol, price }（主要來源）
-        async function fetchBinanceAda() {
+        async function fetchBinanceArb() {
             for (const host of BINANCE_HOSTS) {
                 try {
                     const res = await fetchWithTimeout(`${host}/api/v3/ticker/price?symbol=${CRYPTO_PAIR}`, {}, 5000);
@@ -807,8 +835,8 @@
             return null;
         }
 
-        // CoinGecko：免 key、支援 CORS，回傳 { cardano: { usd: 0.21 } }（備援）
-        async function fetchCoingeckoAda() {
+        // CoinGecko：免 key、支援 CORS，回傳 { arbitrum: { usd: 0.09 } }（備援）
+        async function fetchCoingeckoArb() {
             try {
                 const res = await fetchWithTimeout(
                     `https://api.coingecko.com/api/v3/simple/price?ids=${COINGECKO_ID}&vs_currencies=usd`, {}, 6000
@@ -820,8 +848,8 @@
             } catch (e) { return null; }
         }
 
-        // Coinbase：支援 CORS，回傳 { data: { amount: "0.21" } }（備援）
-        async function fetchCoinbaseAda() {
+        // Coinbase：支援 CORS，回傳 { data: { amount: "0.09" } }（備援）
+        async function fetchCoinbaseArb() {
             try {
                 const res = await fetchWithTimeout(`https://api.coinbase.com/v2/prices/${COINBASE_PAIR}/spot`, {}, 6000);
                 if (!res.ok) return null;
@@ -832,13 +860,13 @@
         }
 
         async function syncCrypto() {
-            const asset = portfolio.find(a => a.symbol === 'ADA');
+            const asset = portfolio.find(a => a.symbol === 'ARB');
             if (!asset) return false;
 
             // 幣安為主要來源；CoinGecko、Coinbase 依序備援
-            let newPrice = await fetchBinanceAda();
-            if (newPrice === null) newPrice = await fetchCoingeckoAda();
-            if (newPrice === null) newPrice = await fetchCoinbaseAda();
+            let newPrice = await fetchBinanceArb();
+            if (newPrice === null) newPrice = await fetchCoingeckoArb();
+            if (newPrice === null) newPrice = await fetchCoinbaseArb();
 
             if (newPrice === null) return false; // 三家全失敗，保留快取價
 
@@ -1057,7 +1085,7 @@
                     <td>
                         <div class="asset-name">
                             <span class="asset-symbol" style="font-weight:700;">${asset.symbol}</span>
-                            <span class="asset-type" style="display:block; font-size:0.75rem; color:var(--text-muted); margin-top:2px;">${asset.type} · <span class="badge ${asset.currency.toLowerCase()}">${asset.currency}</span>${asset.staking ? ` · <span class="badge" style="background:rgba(139,92,246,0.15); color:#A78BFA;" title="年化 ${(asset.staking.apy*100).toFixed(1)}%，每小時自動複利">🔄 複利中</span>` : ''}</span>
+                            <span class="asset-type" style="display:block; font-size:0.75rem; color:var(--text-muted); margin-top:2px;">${asset.type} · <span class="badge ${asset.currency.toLowerCase()}">${asset.currency}</span>${asset.staking ? (Number.isFinite(asset.staking.startTime) && Date.now() < asset.staking.startTime ? ` · <span class="badge" style="background:rgba(245,158,11,0.15); color:#FBBF24;" title="將於 ${new Date(asset.staking.startTime).toLocaleString('zh-TW')} 開始複利">⏳ 即將啟動</span>` : ` · <span class="badge" style="background:rgba(139,92,246,0.15); color:#A78BFA;" title="年化 ${(asset.staking.apy*100).toFixed(1)}%，每小時自動複利">🔄 複利中</span>`) : ''}</span>
                         </div>
                     </td>
                     <td>
@@ -1088,7 +1116,7 @@
                 mobileCard.id = `mobile-card-${asset.symbol}`;
                 mobileCard.innerHTML = `
                     <div class="mobile-card-row">
-                        <span style="font-weight:700; font-size:1.05rem">${asset.symbol} <span class="badge ${asset.currency.toLowerCase()}" style="font-size:0.65rem; vertical-align:middle; margin-left:4px">${asset.currency}</span>${asset.staking ? ` <span class="badge" style="font-size:0.65rem; vertical-align:middle; background:rgba(139,92,246,0.15); color:#A78BFA;">🔄 複利中</span>` : ''}</span>
+                        <span style="font-weight:700; font-size:1.05rem">${asset.symbol} <span class="badge ${asset.currency.toLowerCase()}" style="font-size:0.65rem; vertical-align:middle; margin-left:4px">${asset.currency}</span>${asset.staking ? (Number.isFinite(asset.staking.startTime) && Date.now() < asset.staking.startTime ? ` <span class="badge" style="font-size:0.65rem; vertical-align:middle; background:rgba(245,158,11,0.15); color:#FBBF24;">⏳ 即將啟動</span>` : ` <span class="badge" style="font-size:0.65rem; vertical-align:middle; background:rgba(139,92,246,0.15); color:#A78BFA;">🔄 複利中</span>`) : ''}</span>
                         <span style="font-size:0.75rem; color:var(--text-muted)">${asset.type}</span>
                     </div>
                     <div class="mobile-card-row" style="margin-top:10px;">
@@ -1157,7 +1185,7 @@
             const newsData = [
                 { title: "台灣半導體與高股息 ETF 資金流向科技股，00405A 獲內資強力支撐", source: "時報財經電子報", time: "20分鐘前", url: "https://news.cnyes.com" },
                 { title: "聯準會最新利率決議釋出降息訊號，美股科技股與 SPCX 淨值重回多頭上升軌道", source: "華爾街見聞", time: "1小時前", url: "https://www.wallstreetcn.com" },
-                { title: "Cardano (ADA) Ouroboros Leios 升級邁向年底主網分叉，鏈上原生代幣交易量顯著攀升", source: "區塊客", time: "25分鐘前", url: "https://www.cardano.org" },
+                { title: "Arbitrum (ARB) 生態 TVL 持續領跑 Layer 2 賽道，DAO 治理提案聚焦資金配置效率", source: "區塊客", time: "25分鐘前", url: "https://arbitrum.io" },
                 { title: "外匯市場動態：新台幣兌美元匯率受外資進出影響，短期於當前區塊強勢震盪", source: "經濟日報", time: "42分鐘前", url: "https://money.udn.com" }
             ];
 
