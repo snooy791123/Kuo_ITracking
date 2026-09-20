@@ -503,7 +503,8 @@
     <script>
         const DEFAULT_PORTFOLIO = [
             { symbol: '00405A', fugleSymbol: '00405A', finnhubSymbol: null, type: '台股持倉', qty: 4000, cost: 8.1231, currency: 'TWD', livePrice: 8.56, history: [8.38, 8.44, 8.49, 8.53, 8.56] },
-            { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 10, cost: 133.63, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] }
+            { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 10, cost: 133.63, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
+            { symbol: 'DOGE', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 3663.83, cost: 0.0865, currency: 'USDT', livePrice: 0.0867, history: [0.0821, 0.0840, 0.0855, 0.0862, 0.0867], costTWD: 10000 }
         ];
 
         // Finnhub token（美股直連用）。單一 HTML 自用版，token 會出現在原始碼，
@@ -521,7 +522,7 @@
         ];
 
         // 版本號提升為 v10：持倉數量/成本已更新，需捨棄舊快取才不會被覆蓋回舊值
-        const STORAGE_KEY = 'asset_portfolio_v26';
+        const STORAGE_KEY = 'asset_portfolio_v27';
 
         // 深度合併本地快取：保留使用者手動編輯的「數量/成本」，
         // 但「即時價/走勢」一律改用最新預設值起步（避免舊版過時快取價殘留），
@@ -814,14 +815,14 @@
             'https://api2.binance.com',
             'https://api3.binance.com'
         ];
-        // ADA（Cardano）在幣安有正式現貨掛牌，以幣安為主要來源；
+        // DOGE（Dogecoin）在幣安有正式現貨掛牌，以幣安為主要來源；
         // CoinGecko、Coinbase 作備援（避免幣安在部分地區/瀏覽器環境被擋時整條斷線）。
-        const CRYPTO_PAIR = 'ADAUSDT';        // 幣安現貨對（主要來源）
-        const COINGECKO_ID = 'cardano';       // CoinGecko 幣種 id
-        const COINBASE_PAIR = 'ADA-USD';      // Coinbase 現貨對（備援）
+        const CRYPTO_PAIR = 'DOGEUSDT';       // 幣安現貨對（主要來源）
+        const COINGECKO_ID = 'dogecoin';      // CoinGecko 幣種 id
+        const COINBASE_PAIR = 'DOGE-USD';     // Coinbase 現貨對（備援）
 
         // 幣安：回傳 { symbol, price }（主要來源）
-        async function fetchBinanceAda() {
+        async function fetchBinanceDoge() {
             for (const host of BINANCE_HOSTS) {
                 try {
                     const res = await fetchWithTimeout(`${host}/api/v3/ticker/price?symbol=${CRYPTO_PAIR}`, {}, 5000);
@@ -834,8 +835,8 @@
             return null;
         }
 
-        // CoinGecko：免 key、支援 CORS，回傳 { cardano: { usd: 0.21 } }（備援）
-        async function fetchCoingeckoAda() {
+        // CoinGecko：免 key、支援 CORS，回傳 { dogecoin: { usd: 0.087 } }（備援）
+        async function fetchCoingeckoDoge() {
             try {
                 const res = await fetchWithTimeout(
                     `https://api.coingecko.com/api/v3/simple/price?ids=${COINGECKO_ID}&vs_currencies=usd`, {}, 6000
@@ -847,8 +848,8 @@
             } catch (e) { return null; }
         }
 
-        // Coinbase：支援 CORS，回傳 { data: { amount: "0.21" } }（備援）
-        async function fetchCoinbaseAda() {
+        // Coinbase：支援 CORS，回傳 { data: { amount: "0.087" } }（備援）
+        async function fetchCoinbaseDoge() {
             try {
                 const res = await fetchWithTimeout(`https://api.coinbase.com/v2/prices/${COINBASE_PAIR}/spot`, {}, 6000);
                 if (!res.ok) return null;
@@ -859,13 +860,13 @@
         }
 
         async function syncCrypto() {
-            const asset = portfolio.find(a => a.symbol === 'ADA');
+            const asset = portfolio.find(a => a.symbol === 'DOGE');
             if (!asset) return false;
 
             // 幣安為主要來源；CoinGecko、Coinbase 依序備援
-            let newPrice = await fetchBinanceAda();
-            if (newPrice === null) newPrice = await fetchCoingeckoAda();
-            if (newPrice === null) newPrice = await fetchCoinbaseAda();
+            let newPrice = await fetchBinanceDoge();
+            if (newPrice === null) newPrice = await fetchCoingeckoDoge();
+            if (newPrice === null) newPrice = await fetchCoinbaseDoge();
 
             if (newPrice === null) return false; // 三家全失敗，保留快取價
 
@@ -1063,7 +1064,11 @@
 
             portfolio.forEach((asset, index) => {
                 const fx = asset.currency === 'TWD' ? 1 : usdToTwd;
-                const costTWD = asset.qty * asset.cost * fx;
+                // 若資產設定了 costTWD（固定台幣本金），成本一律以此為準，
+                // 不受「均價買賣次數」或「匯率波動」影響——例如整個加密貨幣部位
+                // 只投入固定金額，之後不管換成哪顆幣，本金基準都鎖定在這裡。
+                // 未設定 costTWD 的資產（台股、美股等）沿用原本「均價×數量×匯率」算法。
+                const costTWD = Number.isFinite(asset.costTWD) ? asset.costTWD : asset.qty * asset.cost * fx;
                 const valueTWD = asset.qty * asset.livePrice * fx;
                 const profitTWD = valueTWD - costTWD;
                 const rate = costTWD > 0 ? (profitTWD / costTWD) * 100 : 0;
@@ -1184,7 +1189,7 @@
             const newsData = [
                 { title: "台灣半導體與高股息 ETF 資金流向科技股，00405A 獲內資強力支撐", source: "時報財經電子報", time: "20分鐘前", url: "https://news.cnyes.com" },
                 { title: "聯準會最新利率決議釋出降息訊號，美股科技股與 SPCX 淨值重回多頭上升軌道", source: "華爾街見聞", time: "1小時前", url: "https://www.wallstreetcn.com" },
-                { title: "Cardano (ADA) Ouroboros Leios 升級邁向年底主網分叉，鏈上原生代幣交易量顯著攀升", source: "區塊客", time: "25分鐘前", url: "https://www.cardano.org" },
+                { title: "Dogecoin (DOGE) 隨迷因幣板塊回溫走高，市場關注是否重返主流交易所話題熱度", source: "區塊客", time: "25分鐘前", url: "https://dogecoin.com" },
                 { title: "外匯市場動態：新台幣兌美元匯率受外資進出影響，短期於當前區塊強勢震盪", source: "經濟日報", time: "42分鐘前", url: "https://money.udn.com" }
             ];
 
