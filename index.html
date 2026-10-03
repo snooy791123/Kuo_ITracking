@@ -293,6 +293,9 @@
             box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
         }
 
+        .price-meta { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px; white-space: nowrap; }
+        .price-meta.warn { color: #FBBF24; }
+
         .badge {
             padding: 0.2rem 0.4rem;
             border-radius: 6px;
@@ -502,7 +505,7 @@
 
     <script>
         const DEFAULT_PORTFOLIO = [
-            { symbol: '00405A', fugleSymbol: '00405A', finnhubSymbol: null, type: '台股持倉', qty: 4000, cost: 8.1231, currency: 'TWD', livePrice: 8.56, history: [8.38, 8.44, 8.49, 8.53, 8.56] },
+            { symbol: '00405A', fugleSymbol: '00405A', finnhubSymbol: null, type: '台股持倉', qty: 4000, cost: 8.1231, currency: 'TWD', livePrice: 9.42, history: [9.26, 9.30, 9.35, 9.39, 9.42] },
             { symbol: 'SPCX', fugleSymbol: null, finnhubSymbol: 'SPCX', type: '美股長投', qty: 10, cost: 133.63, currency: 'USD', livePrice: 192.50, history: [189.2, 190.5, 191.1, 191.8, 192.5] },
             { symbol: 'ATH', fugleSymbol: null, finnhubSymbol: null, type: '加密貨幣', qty: 56009.1, cost: 0.006036, currency: 'USDT', livePrice: 0.006001, history: [0.00566, 0.00581, 0.00594, 0.00603, 0.006001], costTWD: 10000 }
         ];
@@ -515,14 +518,19 @@
         // 某個代理若哪天失效，會自動換下一個；可自行增刪。
         // {url} 會被替換成「已 encodeURIComponent 的目標網址」。
         const CORS_PROXIES = [
-            'https://corsproxy.io/?url={url}',
             'https://api.allorigins.win/raw?url={url}',
+            'https://api.codetabs.com/v1/proxy/?quest={url}',
+            'https://corsproxy.io/?url={url}',
             'https://thingproxy.freeboard.io/fetch/{rawurl}',
-            'https://api.codetabs.com/v1/proxy/?quest={url}'
+            'https://api.allorigins.win/get?url={url}'   // 回傳會被包在 contents 欄位，程式會自動拆開
         ];
 
+        // 自架台股報價 API（選填，最穩）：部署 api/tw-quote.js 到 Vercel 後填入網址，
+        // 例：'https://你的專案.vercel.app'。填了之後台股會優先走自己的 API，公開代理只當備援。
+        const TW_API_BASE = '';
+
         // 版本號提升為 v10：持倉數量/成本已更新，需捨棄舊快取才不會被覆蓋回舊值
-        const STORAGE_KEY = 'asset_portfolio_v28';
+        const STORAGE_KEY = 'asset_portfolio_v29';
 
         // 深度合併本地快取：保留使用者手動編輯的「數量/成本」，
         // 但「即時價/走勢」一律改用最新預設值起步（避免舊版過時快取價殘留），
@@ -611,6 +619,7 @@
         let countdownTimer = null;
         let tickTimer = null;
         let isSyncing = false;
+        let firstSyncDone = false;   // 第一輪同步完成前，價格來源欄顯示「同步中」而非警告
         let isSoundEnabled = JSON.parse(localStorage.getItem('sound_enabled') ?? 'true');
 
         const HISTORY_CAP = 30;
@@ -632,14 +641,33 @@
         }
 
         // 統一的真價更新：先比較舊價決定漲跌，再寫入新價，杜絕「先賦值後比較」的順序錯誤
-        function applyLivePrice(asset, newPrice) {
+        function applyLivePrice(asset, newPrice, source) {
             if (!Number.isFinite(newPrice) || newPrice <= 0) return;
+            // 不論價格有沒有變動，只要成功抓到就記錄來源與時間，方便在畫面上確認「真的有抓到」
+            asset.priceSource = source || asset.priceSource || '';
+            asset.priceTime = Date.now();
             const oldPrice = asset.livePrice;
             if (newPrice === oldPrice) return;
             const direction = newPrice > oldPrice ? 'up' : 'down';
             asset.livePrice = newPrice;
             pushHistory(asset, newPrice);
             return direction;
+        }
+
+        // 價格來源與更新時間：讓你一眼確認「這個價格是不是真的抓到的」
+        function priceMetaHtml(asset) {
+            const auto = asset.fugleSymbol || asset.finnhubSymbol || asset.type === '加密貨幣';
+            if (asset.priceSource === '手動輸入') return `<div class="price-meta">✍ 手動輸入</div>`;
+            if (asset.priceTime) {
+                const t = new Date(asset.priceTime).toLocaleTimeString('zh-TW', { hour12: false });
+                const stale = Date.now() - asset.priceTime > 5 * 60 * 1000;
+                const notLive = /昨收|開盤/.test(asset.priceSource || '');
+                return `<div class="price-meta${(stale || notLive) ? ' warn' : ''}">${asset.priceSource} · ${t}${stale ? '（已過時）' : ''}</div>`;
+            }
+            if (!auto) return '';
+            return firstSyncDone
+                ? `<div class="price-meta warn">⚠ 未取得即時價（目前為預設/快取值）</div>`
+                : `<div class="price-meta">同步中…</div>`;
         }
 
         function formatCurrency(val) {
@@ -676,6 +704,8 @@
             const asset = portfolio[index];
             const direction = (numVal > asset.livePrice) ? 'up' : (numVal < asset.livePrice ? 'down' : 'up');
             asset.livePrice = numVal;
+            asset.priceSource = '手動輸入';
+            asset.priceTime = Date.now();
             pushHistory(asset, numVal);
             persistPortfolio();
             calculateAndRender();
@@ -853,13 +883,14 @@
             if (!asset) return false;
 
             // MEXC 為主要來源；CoinGecko、Coinbase 依序備援
+            let src = 'MEXC';
             let newPrice = await fetchMexcAth();
-            if (newPrice === null) newPrice = await fetchCoingeckoAth();
-            if (newPrice === null) newPrice = await fetchCoinbaseAth();
+            if (newPrice === null) { newPrice = await fetchCoingeckoAth(); src = 'CoinGecko'; }
+            if (newPrice === null) { newPrice = await fetchCoinbaseAth(); src = 'Coinbase'; }
 
             if (newPrice === null) return false; // 三家全失敗，保留快取價
 
-            const dir = applyLivePrice(asset, newPrice);
+            const dir = applyLivePrice(asset, newPrice, src);
             if (dir) {
                 triggerNeonFlash(`row-${asset.symbol}`, dir);
                 triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
@@ -876,7 +907,7 @@
                 const data = await res.json();
                 const newPrice = parseFloat(data.c);
                 if (Number.isFinite(newPrice) && newPrice !== 0) {
-                    const dir = applyLivePrice(asset, newPrice);
+                    const dir = applyLivePrice(asset, newPrice, 'Finnhub');
                     if (dir) {
                         triggerNeonFlash(`row-${asset.symbol}`, dir);
                         triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
@@ -886,97 +917,126 @@
             } catch (e) { return false; }
         }
 
-        // 透過 CORS 代理清單依序嘗試抓取目標網址，回傳 Response（失敗回 null）
-        async function fetchViaProxies(targetUrl, timeout = 9000) {
-            const encoded = encodeURIComponent(targetUrl);
-            for (const tpl of CORS_PROXIES) {
-                const proxyUrl = tpl
-                    .replace('{url}', encoded)
-                    .replace('{rawurl}', targetUrl); // thingproxy 吃未編碼網址
-                try {
-                    const res = await fetchWithTimeout(proxyUrl, {}, timeout);
-                    if (res.ok) return res;
-                } catch (e) {
-                    // 換下一個代理
-                }
-            }
-            return null;
+        // 取第一個「有效」結果；全部失敗回 null
+        function firstValid(promises) {
+            return new Promise(resolve => {
+                let pending = promises.length;
+                if (!pending) return resolve(null);
+                promises.forEach(p => p.then(
+                    v => { if (v !== null) resolve(v); else if (--pending === 0) resolve(null); },
+                    () => { if (--pending === 0) resolve(null); }
+                ));
+            });
         }
 
-        // 來源一：證交所即時端點（z=現價, y=昨收, o=開盤；盤後 z 可能為 "-"）
-        async function fetchTwseAll(twAssets) {
-            // 多檔一次查：tse_2330.tw|tse_0050.tw|...（先當上市，抓不到的再個別試上櫃）
-            const exch = twAssets.map(a => `tse_${a.fugleSymbol}.tw`).join('|');
-            const target = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exch}&json=1&delay=0`;
-            const res = await fetchViaProxies(target);
-            if (!res) return 0;
+        // 透過 CORS 代理抓 JSON，並用 validator 驗證「內容」是否有效（不是只看 HTTP 200）。
+        // 代理錯誤頁、空結果、被限流等無效內容會被丟掉並改試下一個代理；
+        // 各代理錯開 stagger 毫秒啟動，先成功者勝出，兼顧速度與不過度打擾來源網站。
+        async function fetchJsonViaProxies(targetUrl, validator, perTry = 7000, stagger = 1200) {
+            const encoded = encodeURIComponent(targetUrl);
+            let done = false;
+            const attempts = CORS_PROXIES.map((tpl, i) => (async () => {
+                if (i > 0) await new Promise(r => setTimeout(r, i * stagger));
+                if (done) return null;
+                const proxyUrl = tpl.replace('{url}', encoded).replace('{rawurl}', targetUrl);
+                try {
+                    const res = await fetchWithTimeout(proxyUrl, {}, perTry);
+                    if (!res.ok) return null;
+                    let data = JSON.parse(await res.text());
+                    // allorigins /get 會把原始內容包在 contents 字串裡
+                    if (data && typeof data.contents === 'string') data = JSON.parse(data.contents);
+                    return validator(data) ? data : null;
+                } catch (e) { return null; }
+            })());
+            const result = await firstValid(attempts);
+            done = true;
+            return result;
+        }
 
-            let data;
-            try { data = await res.json(); }
-            catch (e) {
-                // 某些代理會把 JSON 包成字串，試著再解析一次
-                try { data = JSON.parse(await res.text()); } catch (_) { return 0; }
+        // 標記某檔台股本輪已更新（價格 + 來源 + 閃爍提示）
+        function applyTwPrice(asset, price, source) {
+            const dir = applyLivePrice(asset, price, source);
+            if (dir) {
+                triggerNeonFlash(`row-${asset.symbol}`, dir);
+                triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
             }
-            const arr = data && Array.isArray(data.msgArray) ? data.msgArray : [];
-            let okCount = 0;
-            for (const item of arr) {
+        }
+
+        // 來源零：自架 API（TW_API_BASE 有填才用），回傳已更新的 symbol 清單
+        async function fetchTwViaOwnApi(twAssets) {
+            if (!TW_API_BASE) return [];
+            try {
+                const symbols = twAssets.map(a => a.fugleSymbol).join(',');
+                const res = await fetchWithTimeout(`${TW_API_BASE}/api/tw-quote?symbols=${encodeURIComponent(symbols)}&_=${Date.now()}`, {}, 8000);
+                if (!res.ok) return [];
+                const data = await res.json();
+                const updated = [];
+                for (const q of (Array.isArray(data?.quotes) ? data.quotes : [])) {
+                    const asset = twAssets.find(a => a.fugleSymbol === q.symbol);
+                    const price = Number(q.price);
+                    if (asset && Number.isFinite(price) && price > 0) {
+                        applyTwPrice(asset, price, q.live === false ? '自架API·昨收' : '自架API');
+                        updated.push(asset.symbol);
+                    }
+                }
+                return updated;
+            } catch (e) { return []; }
+        }
+
+        // 來源一：證交所即時端點（z=現價, y=昨收, o=開盤；尚無成交時 z 為 "-"）
+        // 同時查上市(tse_)與上櫃(otc_)，不必猜標的在哪個市場；回傳已更新的 symbol 清單
+        async function fetchTwseAll(twAssets) {
+            const exch = twAssets.flatMap(a => [`tse_${a.fugleSymbol}.tw`, `otc_${a.fugleSymbol}.tw`]).join('%7C');
+            // _= 時間戳：避免公開代理回傳舊的快取結果
+            const target = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exch}&json=1&delay=0&_=${Date.now()}`;
+            const data = await fetchJsonViaProxies(target, d => d && Array.isArray(d.msgArray) && d.msgArray.some(it => it && it.c));
+            if (!data) return [];
+
+            const updated = [];
+            for (const item of data.msgArray) {
                 const asset = twAssets.find(a => a.fugleSymbol === item.c);
                 if (!asset) continue;
-                // z 現價優先，無效時回退昨收 y、開盤 o
-                let price = parseFloat(item.z);
-                if (!Number.isFinite(price) || price <= 0) price = parseFloat(item.y);
-                if (!Number.isFinite(price) || price <= 0) price = parseFloat(item.o);
-                if (Number.isFinite(price) && price > 0) {
-                    const dir = applyLivePrice(asset, price);
-                    if (dir) {
-                        triggerNeonFlash(`row-${asset.symbol}`, dir);
-                        triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
-                    }
-                    okCount++;
+                let price = parseFloat(item.z), src = '證交所';
+                if (!(price > 0)) { price = parseFloat(item.y); src = '證交所·昨收'; }
+                if (!(price > 0)) { price = parseFloat(item.o); src = '證交所·開盤'; }
+                if (price > 0) {
+                    applyTwPrice(asset, price, src);
+                    if (!updated.includes(asset.symbol)) updated.push(asset.symbol);
                 }
             }
-            return okCount;
+            return updated;
         }
 
         // 來源二：Yahoo（個別查，台股加 .TW，抓不到再試 .TWO）
         async function fetchYahooOne(asset) {
             for (const suffix of ['.TW', '.TWO']) {
-                const target = `https://query1.finance.yahoo.com/v8/finance/chart/${asset.fugleSymbol}${suffix}?interval=1d&range=1d`;
-                const res = await fetchViaProxies(target);
-                if (!res) continue;
-                let data;
-                try { data = await res.json(); }
-                catch (e) { try { data = JSON.parse(await res.text()); } catch (_) { continue; } }
-                const meta = data?.chart?.result?.[0]?.meta;
-                const price = Number(meta?.regularMarketPrice);
-                if (Number.isFinite(price) && price > 0) {
-                    const dir = applyLivePrice(asset, price);
-                    if (dir) {
-                        triggerNeonFlash(`row-${asset.symbol}`, dir);
-                        triggerNeonFlash(`mobile-card-${asset.symbol}`, dir);
-                    }
-                    return true;
-                }
+                const target = `https://query1.finance.yahoo.com/v8/finance/chart/${asset.fugleSymbol}${suffix}?interval=1d&range=1d&_=${Date.now()}`;
+                const data = await fetchJsonViaProxies(target, d => Number(d?.chart?.result?.[0]?.meta?.regularMarketPrice) > 0);
+                if (!data) continue;
+                applyTwPrice(asset, Number(data.chart.result[0].meta.regularMarketPrice), 'Yahoo');
+                return true;
             }
             return false;
         }
 
+        // 台股同步：自架 API → 證交所 → Yahoo，逐層補抓「還沒更新到」的標的。
+        // 只有「全部標的都拿到價格」才回傳 true，狀態列才不會誤報成功。
         async function syncTwStocks() {
             const twAssets = portfolio.filter(a => a.fugleSymbol);
             if (!twAssets.length) return false;
 
-            // 先試證交所即時端點（最即時、一次抓多檔）
-            let got = 0;
-            try { got = await fetchTwseAll(twAssets); } catch (e) { got = 0; }
+            const updated = new Set();
+            const missing = () => twAssets.filter(a => !updated.has(a.symbol));
 
-            // 證交所沒全抓到時，改用 Yahoo 個別補抓
-            if (got < twAssets.length) {
-                for (const asset of twAssets) {
-                    try { await fetchYahooOne(asset); } catch (e) { /* 續下一檔 */ }
-                }
+            (await fetchTwViaOwnApi(twAssets)).forEach(sym => updated.add(sym));
+
+            if (missing().length) {
+                try { (await fetchTwseAll(missing())).forEach(sym => updated.add(sym)); } catch (e) { /* 換下一個來源 */ }
             }
-
-            return true; // 有快取保底，不視為硬失敗
+            for (const asset of missing()) {
+                try { if (await fetchYahooOne(asset)) updated.add(asset.symbol); } catch (e) { /* 續下一檔 */ }
+            }
+            return missing().length === 0;
         }
 
         async function syncAllData() {
@@ -1007,12 +1067,25 @@
                 syncTwStocks()
             ]);
 
-            const anySuccess = results.some(r => r.status === 'fulfilled' && r.value === true);
+            // 依持倉實際有的類別，逐項顯示是否成功（匯率 / 加密 / 美股 / 台股）
+            const okOf = r => r.status === 'fulfilled' && r.value === true;
+            const groups = [
+                ['匯率', true, results[0]],
+                ['加密', portfolio.some(a => a.type === '加密貨幣'), results[1]],
+                ['美股', portfolio.some(a => a.finnhubSymbol), results[2]],
+                ['台股', portfolio.some(a => a.fugleSymbol), results[3]]
+            ].filter(g => g[1]);
+            const failed = groups.filter(g => !okOf(g[2])).map(g => g[0]);
+            firstSyncDone = true;
 
             if (apiStatusEl) {
-                apiStatusEl.innerHTML = anySuccess
-                    ? `<i class="fa-solid fa-circle-check"></i> 數據流連動完美`
-                    : `<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)"></i> 本地真值模式`;
+                if (failed.length === 0) {
+                    apiStatusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> 數據流連動完美`;
+                } else if (failed.length === groups.length) {
+                    apiStatusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)"></i> 本地真值模式`;
+                } else {
+                    apiStatusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#FBBF24"></i> <span style="color:#FBBF24">未更新：${failed.join('、')}</span>`;
+                }
             }
 
             persistPortfolio();
@@ -1094,6 +1167,7 @@
                         <span style="font-size:0.85rem; color:var(--text-muted); font-family:monospace; font-weight:700;">${asset.currency === 'TWD' ? 'NT$' : '$'}</span>
                         <input type="number" class="price-override-input" value="${formatDecimal(asset.livePrice, asset.currency === 'TWD' ? 2 : 3)}" step="any"
                             onchange="overrideLivePrice(${index}, this.value)" title="點擊可直接手動修正真實市價">
+                        ${priceMetaHtml(asset)}
                     </td>
                     <td>
                         <canvas id="sparkline-${asset.symbol}" class="sparkline-canvas" width="110" height="36"></canvas>
@@ -1131,6 +1205,7 @@
                         <input type="number" class="price-override-input" value="${formatDecimal(asset.livePrice, asset.currency === 'TWD' ? 2 : 3)}" step="any" style="text-align:right; width:120px"
                             onchange="overrideLivePrice(${index}, this.value)" title="點擊可直接手動修正真實市價">
                     </div>
+                    <div style="text-align:right; margin:-0.3rem 0 0.4rem 0;">${priceMetaHtml(asset)}</div>
                     <div class="mobile-card-row" style="margin: 0.5rem 0;">
                         <span class="mobile-card-label">走勢線</span>
                         <canvas id="mobile-sparkline-${asset.symbol}" class="sparkline-canvas" width="140" height="30"></canvas>
